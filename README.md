@@ -31,7 +31,7 @@ python -m xcom2_characterpool inspect-character .\soldiers.bin --index 0
 # Create a pool with a starter soldier (use --empty for an empty pool)
 python -m xcom2_characterpool new .\new-pool.bin --first-name Jane --last-name Doe --nickname Viper
 
-# Add a soldier or edit fields by zero-based index
+# Add a randomized soldier or edit fields by zero-based index
 python -m xcom2_characterpool add .\new-pool.bin -o .\updated.bin --first-name Alex --last-name Kim
 python -m xcom2_characterpool set .\updated.bin -o .\edited.bin --index 0 --property strFirstName=Jane --property nmHaircut=Hair_Template
 
@@ -50,6 +50,8 @@ python -m xcom2_characterpool templates --search Kevlar --part-type Torso
 ```
 
 `set` accepts any character property name; appearance fields are found recursively by property name. Integer and boolean properties are converted to the correct binary value type. The JSON format preserves nested and currently unknown properties. Edit the exported JSON without removing the `format`, `header_properties`, or `characters` fields.
+
+`add` randomly selects a Soldier template from the bundled `Templates/New Character.txt` records, based on the supplied character pools. It applies the requested name and always sets the character type and Soldier/VIP/Dark VIP eligibility flags.
 
 For XCOM 2 to load a pool, place the resulting `.bin` file in the game's `CharacterPool/Importable` directory. Common locations are:
 

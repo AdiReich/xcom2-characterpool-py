@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
+import random
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -178,6 +180,31 @@ def _load_templates() -> list[dict[str, str]]:
     return templates
 
 
+def _load_character_templates() -> list[Character]:
+    path = DATA_DIR / "Templates" / "New Character.txt"
+    templates = json.loads(_read_asset(path))
+    if not isinstance(templates, list) or not templates:
+        raise PoolFormatError("No character templates are available.")
+    return [Character.from_dict(item) for item in templates]
+
+
+def _set_character_property(character: Character, name: str, value: Any) -> None:
+    prop = _get_property(character.properties, name)
+    if prop is None:
+        raise PoolFormatError(f"Character template is missing property: {name}.")
+    prop.value = value
+    if prop.type_name == "BoolProperty" and prop.raw_body is not None:
+        if len(prop.raw_body) == 1:
+            prop.raw_body = b"\1" if value else b"\0"
+        elif len(prop.raw_body) == 5:
+            prop.raw_body = bytes(4) + (b"\1" if value else b"\0")
+        else:
+            prop.raw_body = None
+    else:
+        prop.raw_body = None
+    prop.original_value = value if prop.raw_body is not None else None
+
+
 def _cmd_inspect(args: argparse.Namespace) -> int:
     for path in args.pools:
         pool = read_pool(path)
@@ -262,7 +289,33 @@ def _cmd_import_json(args: argparse.Namespace) -> int:
 
 def _cmd_add(args: argparse.Namespace) -> int:
     pool = read_pool(args.pool)
-    pool.characters.append(_character(args.first_name, args.last_name, args.nickname))
+    templates = _load_character_templates()
+    used_appearances = {
+        appearance.to_bytes()
+        for existing in pool.characters
+        if (appearance := _get_property(existing.properties, "kAppearance")) is not None
+    }
+    available_templates = [
+        template
+        for template in templates
+        if (appearance := _get_property(template.properties, "kAppearance")) is not None
+        and appearance.to_bytes() not in used_appearances
+    ]
+    character = copy.deepcopy(random.choice(available_templates or templates))
+    identity = _character(args.first_name, args.last_name, args.nickname)
+    for name in ("strFirstName", "strLastName", "strNickName", "PoolTimestamp"):
+        identity_prop = _get_property(identity.properties, name)
+        _set_character_property(
+            character, name, identity_prop.value if identity_prop is not None else ""
+        )
+    for name, value in (
+        ("CharacterTemplateName", "Soldier"),
+        ("AllowedTypeSoldier", True),
+        ("AllowedTypeVIP", True),
+        ("AllowedTypeDarkVIP", True),
+    ):
+        _set_character_property(character, name, value)
+    pool.characters.append(character)
     write_pool(pool, args.output)
     print(f"Added character; pool now contains {len(pool.characters)} characters.")
     return 0
@@ -390,7 +443,7 @@ def build_parser() -> argparse.ArgumentParser:
     imp.add_argument("-o", "--output", required=True)
     imp.set_defaults(handler=_cmd_import_json)
 
-    add = commands.add_parser("add", help="Append a starter soldier to a pool")
+    add = commands.add_parser("add", help="Append a randomized soldier to a pool")
     add.add_argument("pool")
     add.add_argument("-o", "--output", required=True)
     add.add_argument("--first-name", required=True)

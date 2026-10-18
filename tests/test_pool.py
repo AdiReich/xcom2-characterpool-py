@@ -4,6 +4,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 from xcom2_characterpool.cli import _character, main
 from xcom2_characterpool.format import Property
@@ -171,6 +172,74 @@ class PoolTests(unittest.TestCase):
             result = main(["merge", str(source), str(source), "-o", str(target)])
             self.assertEqual(result, 0)
             self.assertEqual(len(read_pool(target).characters), 1)
+
+    def test_add_uses_random_template_and_forces_soldier_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source.bin"
+            target = Path(directory) / "target.bin"
+            source_pool = self.make_pool()
+            source.write_bytes(source_pool.to_bytes())
+            template = _character("", "")
+            template.get("kAppearance")[1].value = 0
+            for name in (
+                "AllowedTypeSoldier",
+                "AllowedTypeVIP",
+                "AllowedTypeDarkVIP",
+            ):
+                prop = next(prop for prop in template.properties if prop.name == name)
+                prop.value = False
+                prop.raw_body = b"\0"
+                prop.original_value = False
+            next(
+                prop
+                for prop in template.properties
+                if prop.name == "CharacterTemplateName"
+            ).value = "ReaperSoldier"
+            unused_template = _character("", "")
+            unused_template.get("kAppearance")[1].value = 1
+
+            with patch(
+                "xcom2_characterpool.cli._load_character_templates",
+                return_value=[template, unused_template],
+            ):
+                result = main(
+                    [
+                        "add",
+                        str(source),
+                        "-o",
+                        str(target),
+                        "--first-name",
+                        "Alex",
+                        "--last-name",
+                        "Kim",
+                        "--nickname",
+                        "Viper",
+                    ]
+                )
+
+            self.assertEqual(result, 0)
+            updated_pool = read_pool(target)
+            added = updated_pool.characters[-1]
+            self.assertEqual(added.get("strFirstName"), "Alex")
+            self.assertEqual(added.get("strLastName"), "Kim")
+            self.assertEqual(added.get("strNickName"), "'Viper'")
+            self.assertTrue(added.get("PoolTimestamp"))
+            self.assertEqual(added.get("CharacterTemplateName"), "Soldier")
+            self.assertTrue(added.get("AllowedTypeSoldier"))
+            self.assertTrue(added.get("AllowedTypeVIP"))
+            self.assertTrue(added.get("AllowedTypeDarkVIP"))
+            self.assertEqual(added.get("kAppearance")[1].value, 0)
+            for name in (
+                "AllowedTypeSoldier",
+                "AllowedTypeVIP",
+                "AllowedTypeDarkVIP",
+            ):
+                prop = next(prop for prop in added.properties if prop.name == name)
+                self.assertEqual(prop.raw_body, b"\1")
+            self.assertEqual(
+                updated_pool.characters[0].to_bytes(),
+                source_pool.characters[0].to_bytes(),
+            )
 
 
 if __name__ == "__main__":
