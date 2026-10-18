@@ -65,3 +65,8 @@ Run the test suite with:
 ```powershell
 python -m unittest discover -s tests -v
 ```
+
+## Credits / Acknowledgments
+
+This project is a complete Python rewrite of the original [XCOM2CharacterPoolUtility](https://github.com/Shaosil/XCOM2CharacterPoolUtility) created by [@Shaosil](https://github.com/Shaosil). 
+The entire codebase has been translated and reconstructed in Python with the assistance of AI (GitHub Copilot) to optimize code structure and implementation.
