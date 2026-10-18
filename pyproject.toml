@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xcom2-characterpool"
+version = "2.0.0"
+description = "Command-line tools for XCOM 2 character pools"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+xcom2-characterpool = "xcom2_characterpool.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["xcom2_characterpool*"]
+
+[tool.setuptools.package-data]
+xcom2_characterpool = ["data/Files/*", "data/Files/**/*"]

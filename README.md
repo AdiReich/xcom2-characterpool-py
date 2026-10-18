@@ -1,16 +1,65 @@
-# XCOM2CharacterPoolUtility
-A standalone tool to create characters, merge pools, and customize any options available from XCOM 2's character pool screens. Supports several popular mods
+# XCOM2 CharacterPool for Python
 
-TO INSTALL
-* Ensure you have the .NET Desktop Runtime 9.0 installed. <a href="https://dotnet.microsoft.com/en-us/download/dotnet/thank-you/runtime-desktop-9.0.6-windows-x64-installer">Download from Microsoft here</a>
-* Download this program's latest release <a href="https://github.com/Shaosil/XCOM2CharacterPoolUtility/releases/latest">here</a> and extract it to a folder
-* Run XCOM 2 Character Pool Utility.exe
+A Python command-line utility for inspecting, creating, editing, and merging XCOM 2 character pools. The original template, palette, and localization data is bundled with the package.
 
-For XCOM 2 to see a character pool, you will have to save it in the proper place.
-If you do <b>NOT</b> have the War of the Chosen expansion, you can save it in
-> {Your User Folder}\Documents\My Games\XCOM2\XComGame\CharacterPool\Importable
+## Requirements
 
-If you <b>DO</b> have War of the Chosen, you can still use the vanilla path, OR you can put it in
-> {Your User Folder}\Documents\My Games\XCOM2 War of the Chosen\XComGame\CharacterPool\Importable
+Python 3.10 or later. The application has no third-party runtime dependencies.
 
-YouTube overview/tutorial <a href="https://youtu.be/4fsvSy9pbtw">here</a>
+Run from the repository root:
+
+```powershell
+python -m xcom2_characterpool --help
+```
+
+Or install the command locally:
+
+```powershell
+python -m pip install .
+xcom2-characterpool --help
+```
+
+## Commands
+
+```powershell
+# Show pool contents
+python -m xcom2_characterpool inspect .\soldiers.bin
+
+# Show every property for character index 0
+python -m xcom2_characterpool inspect-character .\soldiers.bin --index 0
+
+# Create a pool with a starter soldier (use --empty for an empty pool)
+python -m xcom2_characterpool new .\new-pool.bin --first-name Jane --last-name Doe --nickname Viper
+
+# Add a soldier or edit fields by zero-based index
+python -m xcom2_characterpool add .\new-pool.bin -o .\updated.bin --first-name Alex --last-name Kim
+python -m xcom2_characterpool set .\updated.bin -o .\edited.bin --index 0 --property strFirstName=Jane --property nmHaircut=Hair_Template
+
+# Remove one or more zero-based character indexes
+python -m xcom2_characterpool delete .\edited.bin -o .\trimmed.bin --index 1 --index 3
+
+# Merge pools; duplicate characters are skipped
+python -m xcom2_characterpool merge .\pool-a.bin .\pool-b.bin -o .\merged.bin
+
+# Export all known and unknown properties for complete manual editing
+python -m xcom2_characterpool export-json .\merged.bin -o .\pool.json
+python -m xcom2_characterpool import-json .\pool.json -o .\edited-pool.bin
+
+# Browse bundled templates
+python -m xcom2_characterpool templates --search Kevlar --part-type Torso
+```
+
+`set` accepts any character property name; appearance fields are found recursively by property name. Integer and boolean properties are converted to the correct binary value type. The JSON format preserves nested and currently unknown properties. Edit the exported JSON without removing the `format`, `header_properties`, or `characters` fields.
+
+For XCOM 2 to load a pool, place the resulting `.bin` file in the game's `CharacterPool/Importable` directory. Common locations are:
+
+- `Documents\My Games\XCOM2\XComGame\CharacterPool\Importable`
+- `Documents\My Games\XCOM2 War of the Chosen\XComGame\CharacterPool\Importable`
+
+## Development
+
+Run the test suite with:
+
+```powershell
+python -m unittest discover -s tests -v
+```
