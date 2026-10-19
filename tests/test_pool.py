@@ -26,6 +26,11 @@ class PoolTests(unittest.TestCase):
             path.write_bytes(original)
             self.assertEqual(read_pool(path).to_bytes(), original)
 
+    def test_read_pool_accepts_bytes(self) -> None:
+        pool = self.make_pool()
+
+        self.assertEqual(read_pool(pool.to_bytes()).to_bytes(), pool.to_bytes())
+
     def test_pool_header_property_order_is_preserved(self) -> None:
         pool = Pool(
             [

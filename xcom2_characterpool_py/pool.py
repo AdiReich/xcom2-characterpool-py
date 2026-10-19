@@ -139,8 +139,8 @@ class Pool:
         return pool
 
 
-def read_pool(path: str | Path) -> Pool:
-    data = Path(path).read_bytes()
+def read_pool(path: str | Path | bytes) -> Pool:
+    data = path if isinstance(path, bytes) else Path(path).read_bytes()
     if len(data) < 4 or data[:4] != b"\xff\xff\xff\xff":
         raise PoolFormatError(
             "Invalid character-pool header; expected four 0xFF bytes."
