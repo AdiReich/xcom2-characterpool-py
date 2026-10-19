@@ -10,10 +10,10 @@ requires-python = ">=3.10"
 dependencies = []
 
 [project.scripts]
-xcom2-characterpool = "xcom2_characterpool.cli:main"
+xcom2-characterpool = "xcom2_characterpool_py.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["xcom2_characterpool*"]
+include = ["xcom2_characterpool_py*"]
 
 [tool.setuptools.package-data]
-xcom2_characterpool = ["data/Files/*", "data/Files/**/*"]
+xcom2_characterpool_py = ["data/Files/*", "data/Files/**/*"]

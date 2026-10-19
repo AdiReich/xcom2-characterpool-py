@@ -6,9 +6,9 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
-from xcom2_characterpool.cli import _character, main
-from xcom2_characterpool.format import Property
-from xcom2_characterpool.pool import Character, Pool, read_pool
+from xcom2_characterpool_py.cli import _character, main
+from xcom2_characterpool_py.format import Property
+from xcom2_characterpool_py.pool import Character, Pool, read_pool
 
 
 class PoolTests(unittest.TestCase):
@@ -199,7 +199,7 @@ class PoolTests(unittest.TestCase):
             unused_template.get("kAppearance")[1].value = 1
 
             with patch(
-                "xcom2_characterpool.cli._load_character_templates",
+                "xcom2_characterpool_py.cli._load_character_templates",
                 return_value=[template, unused_template],
             ):
                 result = main(
