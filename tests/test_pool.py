@@ -75,6 +75,32 @@ class PoolTests(unittest.TestCase):
         restored.characters[0].properties[0].value[0].value = False
         self.assertNotEqual(restored.to_bytes(), pool.to_bytes())
 
+    def test_unicode_string_property_round_trip(self) -> None:
+        text = "背景"
+        encoded = text.encode("utf-16-le") + bytes(2)
+        raw_body = (-3).to_bytes(4, "little", signed=True) + encoded
+        prop = Property(
+            "BackgroundText",
+            "StrProperty",
+            text,
+            raw_body=raw_body,
+            original_value=text,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source.bin"
+            target = Path(directory) / "export.json"
+            source.write_bytes(Pool([], [Character([prop])]).to_bytes())
+
+            result = main(["export-json", str(source), "-o", str(target)])
+
+            self.assertEqual(result, 0)
+            document = json.loads(target.read_text(encoding="utf-8"))
+
+        exported = document["characters"][0]["properties"][0]
+        self.assertEqual(exported["value"], text)
+        self.assertEqual(bytes.fromhex(exported["raw_body"]), raw_body)
+
     def test_tag_first_struct_round_trip_preserves_layout(self) -> None:
         prop = Property(
             "CharacterPoolSerializeHelper",

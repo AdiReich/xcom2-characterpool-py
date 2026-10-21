@@ -91,9 +91,20 @@ class Property:
                 raise PoolFormatError(f"Invalid string data length for {name!r}.")
             raw_body = data[offset : offset + body_length]
             string_length = struct.unpack_from("<i", raw_body)[0]
-            if string_length < 0 or string_length > len(raw_body) - 4:
+            if string_length < 0:
+                string_byte_length = -string_length * 2
+                if string_byte_length > len(raw_body) - 4:
+                    raise PoolFormatError(f"Invalid string length for {name!r}.")
+                value = (
+                    raw_body[4 : 4 + string_byte_length]
+                    .decode("utf-16-le")
+                    .rstrip("\0")
+                    .replace("\r", "\n")
+                )
+            elif string_length > len(raw_body) - 4:
                 raise PoolFormatError(f"Invalid string length for {name!r}.")
-            value = _decode_string(raw_body[4 : 4 + string_length])
+            else:
+                value = _decode_string(raw_body[4 : 4 + string_length])
             offset += body_length
         elif type_name == "StructProperty":
             start = offset
