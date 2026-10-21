@@ -1,4 +1,5 @@
 import json
+import struct
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -75,6 +76,153 @@ class PoolTests(unittest.TestCase):
         restored.characters[0].properties[0].value[0].value = False
         self.assertNotEqual(restored.to_bytes(), pool.to_bytes())
 
+    def test_empty_raw_data_is_regenerated_from_property_values(self) -> None:
+        pool = Pool(
+            [],
+            [
+                _character("Ada", "Test", "Viper"),
+                _character("Grace", "Hopper"),
+            ],
+        )
+        document = read_pool(pool.to_bytes()).to_json()
+
+        def clear_raw_data(value: object) -> None:
+            if isinstance(value, dict):
+                for key in ("raw_body", "raw_value"):
+                    if key in value:
+                        value[key] = ""
+                for child in value.values():
+                    clear_raw_data(child)
+            elif isinstance(value, list):
+                for child in value:
+                    clear_raw_data(child)
+
+        clear_raw_data(document)
+        restored = Pool.from_json(document)
+        parsed = read_pool(restored.to_bytes())
+
+        self.assertEqual(len(parsed.characters), 2)
+        self.assertEqual(
+            [character.full_name for character in parsed.characters],
+            ["Ada Viper Test", "Grace Hopper"],
+        )
+
+    def test_stripped_json_preserves_name_numbers_and_string_encodings(self) -> None:
+        background = "Ne ne ya ZOЖ"
+        background_utf16 = background.encode("utf-16-le") + bytes(2)
+        properties = [
+            Property(
+                "nmEye",
+                "NameProperty",
+                "DefaultEyes",
+                struct.pack("<i", 12) + b"DefaultEyes\0" + struct.pack("<i", 3),
+                "DefaultEyes",
+                name_number=3,
+            ),
+            Property(
+                "nmTeeth",
+                "NameProperty",
+                "DefaultTeeth",
+                struct.pack("<i", 13) + b"DefaultTeeth\0" + bytes(4),
+                "DefaultTeeth",
+            ),
+            Property(
+                "BackgroundText",
+                "StrProperty",
+                background,
+                struct.pack("<i", -(len(background) + 1)) + background_utf16,
+                background,
+            ),
+            Property(
+                "EmptyBackground",
+                "StrProperty",
+                "",
+                bytes(4),
+                "",
+            ),
+            Property(
+                "LineBackground",
+                "StrProperty",
+                "First line\nSecond line",
+                struct.pack("<i", 23) + b"First line\nSecond line\0",
+                "First line\nSecond line",
+            ),
+        ]
+        parsed_eye, offset = Property.read(properties[0].to_bytes(), 0)
+        self.assertEqual(offset, len(properties[0].to_bytes()))
+        self.assertEqual(parsed_eye.name_number, 3)
+        original = b"".join(prop.to_bytes() for prop in properties)
+        document = [prop.to_dict() for prop in properties]
+        self.assertEqual(document[0]["name_number"], 3)
+        self.assertEqual(document[0]["raw_body"], properties[0].raw_body.hex())
+        self.assertEqual(document[0]["raw_value"], "DefaultEyes")
+        for prop in document:
+            prop.pop("raw_body", None)
+            prop.pop("raw_value", None)
+
+        rebuilt = b"".join(Property.from_dict(prop).to_bytes() for prop in document)
+
+        self.assertEqual(rebuilt, original)
+
+    def test_json_rebuild_preserves_tag_first_struct_boundaries(self) -> None:
+        pool = Pool(
+            [],
+            [
+                Character(
+                    [
+                        Property("strFirstName", "StrProperty", "Ada"),
+                        Property(
+                            "kAppearance",
+                            "StructProperty",
+                            [
+                                Property(
+                                    "bGhostPawn", "BoolProperty", False, b"\0", False
+                                )
+                            ],
+                            struct_layout="tag-first",
+                        ),
+                    ]
+                ),
+                Character(
+                    [
+                        Property("strFirstName", "StrProperty", "Grace"),
+                        Property(
+                            "kAppearance",
+                            "StructProperty",
+                            [Property("bGhostPawn", "BoolProperty", True, b"\1", True)],
+                            struct_layout="tag-first",
+                        ),
+                    ]
+                ),
+            ],
+        )
+        document = pool.to_json()
+
+        def clear_raw_data(value: object) -> None:
+            if isinstance(value, dict):
+                for key in ("raw_body", "raw_value"):
+                    if key in value:
+                        value[key] = ""
+                for child in value.values():
+                    clear_raw_data(child)
+            elif isinstance(value, list):
+                for child in value:
+                    clear_raw_data(child)
+
+        clear_raw_data(document)
+        restored = Pool.from_json(document)
+        parsed = read_pool(restored.to_bytes())
+
+        self.assertEqual(
+            [character.full_name for character in parsed.characters],
+            ["Ada", "Grace"],
+        )
+        for character in parsed.characters:
+            appearance = next(
+                prop for prop in character.properties if prop.name == "kAppearance"
+            )
+            self.assertEqual(appearance.declared_size, len(appearance.raw_body) - 20)
+
     def test_unicode_string_property_round_trip(self) -> None:
         text = "背景"
         encoded = text.encode("utf-16-le") + bytes(2)
@@ -116,7 +264,6 @@ class PoolTests(unittest.TestCase):
         self.assertEqual(offset, len(data))
         self.assertEqual(restored.struct_tag, "CharacterPoolDataElement")
         self.assertEqual(restored.struct_layout, "tag-first")
-        restored.declared_size += 20
         pool = Pool([], [Character([restored])])
         json_restored = Pool.from_json(pool.to_json())
         self.assertEqual(json_restored.to_bytes(), pool.to_bytes())
@@ -127,6 +274,10 @@ class PoolTests(unittest.TestCase):
         self.assertEqual(offset, len(rewritten))
         self.assertEqual(reparsed.value[0].value, "Grace")
         self.assertEqual(reparsed.struct_layout, "tag-first")
+        self.assertEqual(
+            reparsed.declared_size,
+            len(reparsed.raw_body) - len(reparsed.struct_tag.encode("cp1252")) - 9,
+        )
 
     def test_compact_bool_round_trip_preserves_layout_when_edited(self) -> None:
         prop = Property("AllowedTypeVIP", "BoolProperty", True, b"\1", True)

@@ -33,6 +33,19 @@ def _encode_string(value: str | None) -> bytes:
     ) + b"\0"
 
 
+def _encode_fstring(value: str | None) -> bytes:
+    text = value or ""
+    if not text:
+        return _write_i32(0)
+    try:
+        encoded = text.encode("cp1252")
+    except UnicodeEncodeError:
+        encoded = text.encode("utf-16-le") + bytes(2)
+        return _write_i32(-(len(encoded) // 2)) + encoded
+    encoded += b"\0"
+    return _write_i32(len(encoded)) + encoded
+
+
 def _pad_string(data: bytes) -> bytes:
     return data + bytes(4)
 
@@ -47,6 +60,7 @@ class Property:
     struct_tag: str = field(default="TAppearance", repr=False)
     declared_size: int | None = field(default=None, repr=False)
     struct_layout: str = field(default="legacy", repr=False)
+    name_number: int = 0
 
     @classmethod
     def read(cls, data: bytes, offset: int) -> tuple[Property | None, int]:
@@ -70,6 +84,7 @@ class Property:
         offset += 4
         if offset > len(data):
             raise PoolFormatError(f"Unexpected end of file before {name!r} data.")
+        name_number = 0
 
         if type_name in ("IntProperty", "ArrayProperty"):
             if offset + 4 > len(data):
@@ -95,6 +110,7 @@ class Property:
                 string_byte_length = -string_length * 2
                 if string_byte_length > len(raw_body) - 4:
                     raise PoolFormatError(f"Invalid string length for {name!r}.")
+                string_data_length = string_byte_length
                 value = (
                     raw_body[4 : 4 + string_byte_length]
                     .decode("utf-16-le")
@@ -104,7 +120,12 @@ class Property:
             elif string_length > len(raw_body) - 4:
                 raise PoolFormatError(f"Invalid string length for {name!r}.")
             else:
+                string_data_length = string_length
                 value = _decode_string(raw_body[4 : 4 + string_length])
+            if type_name == "NameProperty" and body_length >= 8 + string_data_length:
+                name_number = struct.unpack_from(
+                    "<i", raw_body, 4 + string_data_length
+                )[0]
             offset += body_length
         elif type_name == "StructProperty":
             start = offset
@@ -150,7 +171,7 @@ class Property:
             value = raw_body.hex()
             offset += data_length
 
-        result = cls(name, type_name, value, raw_body, value)
+        result = cls(name, type_name, value, raw_body, value, name_number=name_number)
         return result, offset
 
     def to_bytes(self) -> bytes:
@@ -168,19 +189,18 @@ class Property:
         elif self.type_name == "BoolProperty":
             if self.raw_body is not None and self.value == self.original_value:
                 body = self.raw_body
-            elif self.raw_body is not None and len(self.raw_body) == 1:
-                body = b"\1" if self.value else b"\0"
-            else:
+            elif self.raw_body is not None and len(self.raw_body) == 5:
                 body = bytes(4) + (b"\1" if self.value else b"\0")
+            else:
+                body = b"\1" if self.value else b"\0"
             data_length = 0
         elif self.type_name in ("StrProperty", "NameProperty"):
             if self.raw_body is not None and self.value == self.original_value:
                 body = self.raw_body
             else:
-                text = _encode_string(self.value)
-                body = _write_i32(len(text)) + text
+                body = _encode_fstring(self.value)
                 if self.type_name == "NameProperty":
-                    body += bytes(4)
+                    body += _write_i32(self.name_number)
             data_length = len(body)
         elif self.type_name == "StructProperty":
             if self.raw_body is not None and self.value == self.original_value:
@@ -192,19 +212,9 @@ class Property:
                 tag = _encode_string(self.struct_tag)
                 if self.struct_layout == "tag-first":
                     body = _write_i32(len(tag)) + tag + bytes(4) + children
-                    children_length = (
-                        self.declared_size
-                        if self.value == self.original_value
-                        and self.declared_size is not None
-                        else len(body)
-                    )
+                    children_length = len(children)
                 else:
-                    children_length = (
-                        self.declared_size
-                        if self.value == self.original_value
-                        and self.declared_size is not None
-                        else len(children)
-                    )
+                    children_length = len(children)
                     body = (
                         _write_i32(children_length)
                         + bytes(4)
@@ -238,9 +248,12 @@ class Property:
             result["struct_tag"] = self.struct_tag
             result["struct_layout"] = self.struct_layout
             result["declared_size"] = self.declared_size
-        elif self.raw_body is not None:
-            result["raw_body"] = self.raw_body.hex()
-            result["raw_value"] = deepcopy(self.original_value)
+        else:
+            if self.type_name == "NameProperty":
+                result["name_number"] = self.name_number
+            if self.raw_body is not None:
+                result["raw_body"] = self.raw_body.hex()
+                result["raw_value"] = deepcopy(self.original_value)
         return result
 
     @classmethod
@@ -261,7 +274,10 @@ class Property:
                 )
             prop_value = [cls.from_dict(item) for item in prop_value]
         try:
-            raw_body = bytes.fromhex(value["raw_body"]) if "raw_body" in value else None
+            raw_body_hex = value.get("raw_body")
+            raw_body = None
+            if "raw_body" in value and raw_body_hex != "":
+                raw_body = bytes.fromhex(raw_body_hex)
         except (TypeError, ValueError) as exc:
             raise PoolFormatError(
                 f"Property {value['name']!r} has invalid raw_body data."
@@ -273,6 +289,13 @@ class Property:
             raise PoolFormatError(
                 f"Property {value['name']!r} has an invalid declared_size."
             )
+        name_number = value.get("name_number", 0)
+        if value["type"] == "NameProperty" and (
+            not isinstance(name_number, int) or isinstance(name_number, bool)
+        ):
+            raise PoolFormatError(
+                f"Property {value['name']!r} has an invalid name_number."
+            )
         return cls(
             value["name"],
             value["type"],
@@ -282,6 +305,7 @@ class Property:
             struct_tag=value.get("struct_tag", "TAppearance"),
             declared_size=declared_size,
             struct_layout=value.get("struct_layout", "legacy"),
+            name_number=name_number if value["type"] == "NameProperty" else 0,
         )
 
 
