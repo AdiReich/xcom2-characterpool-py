@@ -63,6 +63,20 @@ soldier = generate_character("Jane", "Doe", nickname="Viper")
 
 Pass `biography` to set the soldier's background text, or leave it blank to keep the selected template's biography. Pass `existing_characters` to avoid reusing their appearances when an unused template is available.
 
+For batches, use `generate_characters()` with an iterable of request mappings. Each mapping requires `first_name` and `last_name`, and may include `nickname`. Templates and existing appearances are processed once per batch, and generated appearances are avoided until no unused template appearances remain:
+
+```python
+from xcom2_characterpool_py import generate_characters
+
+soldiers = generate_characters(
+    [
+        {"first_name": "Jane", "last_name": "Doe", "nickname": "Viper"},
+        {"first_name": "Alex", "last_name": "Kim"},
+    ],
+    existing_characters=saved_characters,
+)
+```
+
 For XCOM 2 to load a pool, place the resulting `.bin` file in the game's `CharacterPool/Importable` directory. Common locations are:
 
 - `Documents\My Games\XCOM2\XComGame\CharacterPool\Importable`

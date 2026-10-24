@@ -7,7 +7,7 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
-from xcom2_characterpool_py import generate_character
+from xcom2_characterpool_py import generate_character, generate_characters
 from xcom2_characterpool_py.cli import _character, main
 from xcom2_characterpool_py.format import Property
 from xcom2_characterpool_py.pool import Character, Pool, read_pool
@@ -510,6 +510,132 @@ class PoolTests(unittest.TestCase):
             ).to_bytes(),
         )
         self.assertEqual(available_template.to_bytes(), original_available)
+
+    def test_generate_characters_empty_input_does_not_load_templates(self) -> None:
+        with patch(
+            "xcom2_characterpool_py.pool._load_character_templates",
+        ) as load_templates:
+            self.assertEqual(generate_characters([]), [])
+
+        load_templates.assert_not_called()
+
+    def test_generate_characters_preserves_request_order_and_names(self) -> None:
+        template = _character("Template", "Soldier")
+        requests = [
+            {"first_name": "Ada", "last_name": "Lovelace", "nickname": "Ace"},
+            {"first_name": "Grace", "last_name": "Hopper"},
+        ]
+        with (
+            patch(
+                "xcom2_characterpool_py.pool._load_character_templates",
+                return_value=[template],
+            ) as load_templates,
+            patch(
+                "xcom2_characterpool_py.pool.random.choice",
+                side_effect=lambda items: items[0],
+            ),
+        ):
+            generated = generate_characters(requests)
+
+        self.assertEqual(
+            [
+                (character.get("strFirstName"), character.get("strLastName"))
+                for character in generated
+            ],
+            [("Ada", "Lovelace"), ("Grace", "Hopper")],
+        )
+        self.assertEqual(generated[0].get("strNickName"), "'Ace'")
+        self.assertEqual(generated[1].get("strNickName"), "")
+        load_templates.assert_called_once_with()
+
+    def test_generate_characters_avoids_existing_and_tracks_generated_appearances(
+        self,
+    ) -> None:
+        used_template = _character("Template", "Used")
+        first_available = _character("Template", "First")
+        second_available = _character("Template", "Second")
+        first_available.get("kAppearance")[0].value = "head-one"
+        second_available.get("kAppearance")[0].value = "head-two"
+
+        with (
+            patch(
+                "xcom2_characterpool_py.pool._load_character_templates",
+                return_value=[used_template, first_available, second_available],
+            ),
+            patch(
+                "xcom2_characterpool_py.pool.random.choice",
+                side_effect=lambda items: items[0],
+            ),
+        ):
+            generated = generate_characters(
+                [
+                    {"first_name": "One", "last_name": "Name"},
+                    {"first_name": "Two", "last_name": "Name"},
+                ],
+                existing_characters=[used_template],
+            )
+
+        appearance_ids = [
+            character.get("kAppearance")[0].value for character in generated
+        ]
+        self.assertEqual(appearance_ids, ["head-one", "head-two"])
+
+    def test_generate_characters_reuses_appearances_after_unique_options_run_out(
+        self,
+    ) -> None:
+        first_template = _character("Template", "First")
+        second_template = _character("Template", "Second")
+        second_template.get("kAppearance")[0].value = "head-two"
+
+        with (
+            patch(
+                "xcom2_characterpool_py.pool._load_character_templates",
+                return_value=[first_template, second_template],
+            ),
+            patch(
+                "xcom2_characterpool_py.pool.random.choice",
+                side_effect=lambda items: items[0],
+            ),
+        ):
+            generated = generate_characters(
+                [
+                    {"first_name": "One", "last_name": "Name"},
+                    {"first_name": "Two", "last_name": "Name"},
+                    {"first_name": "Three", "last_name": "Name"},
+                ]
+            )
+
+        appearance_ids = [
+            character.get("kAppearance")[0].value for character in generated
+        ]
+        self.assertEqual(appearance_ids, ["", "head-two", ""])
+
+    def test_generate_characters_does_not_mutate_existing_characters_or_templates(
+        self,
+    ) -> None:
+        existing = _character("Existing", "Soldier")
+        template = _character("Template", "Soldier")
+        original_existing = existing.to_bytes()
+        original_template = template.to_bytes()
+
+        with (
+            patch(
+                "xcom2_characterpool_py.pool._load_character_templates",
+                return_value=[template],
+            ),
+            patch(
+                "xcom2_characterpool_py.pool.random.choice",
+                side_effect=lambda items: items[0],
+            ),
+        ):
+            generated = generate_characters(
+                [{"first_name": "New", "last_name": "Person"}],
+                existing_characters=[existing],
+            )[0]
+
+        self.assertEqual(existing.to_bytes(), original_existing)
+        self.assertEqual(template.to_bytes(), original_template)
+        self.assertIsNot(generated, template)
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ import copy
 import json
 import random
 import sys
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -193,6 +193,60 @@ def _load_character_templates() -> list[Character]:
     return [Character.from_dict(item) for item in templates]
 
 
+def _prepare_character_generation(
+    existing_characters: Iterable[Character],
+) -> tuple[list[tuple[Character, bytes | None]], set[bytes]]:
+    templates = _load_character_templates()
+    template_entries = []
+    for template in templates:
+        appearance = _find_character_property(template.properties, "kAppearance")
+        template_entries.append(
+            (template, appearance.to_bytes() if appearance is not None else None)
+        )
+    used_appearances = {
+        appearance.to_bytes()
+        for existing in existing_characters
+        if (appearance := _find_character_property(existing.properties, "kAppearance"))
+        is not None
+    }
+    return template_entries, used_appearances
+
+
+def _generate_character_from_templates(
+    template_entries: list[tuple[Character, bytes | None]],
+    used_appearances: set[bytes],
+    first_name: str,
+    last_name: str,
+    nickname: str,
+    biography: str = "",
+) -> Character:
+    available_templates = [
+        (template, appearance)
+        for template, appearance in template_entries
+        if appearance is not None and appearance not in used_appearances
+    ]
+    selected_template, selected_appearance = random.choice(
+        available_templates or template_entries
+    )
+    character = copy.deepcopy(selected_template)
+    for name, value in (
+        ("strFirstName", first_name),
+        ("strLastName", last_name),
+        ("strNickName", f"'{nickname}'" if nickname else ""),
+        ("PoolTimestamp", _current_pool_timestamp()),
+        ("CharacterTemplateName", "Soldier"),
+        ("AllowedTypeSoldier", True),
+        ("AllowedTypeVIP", True),
+        ("AllowedTypeDarkVIP", True),
+    ):
+        _set_character_property(character, name, value)
+    if biography:
+        _set_character_property(character, "BackgroundText", biography)
+    if selected_appearance is not None:
+        used_appearances.add(selected_appearance)
+    return character
+
+
 def generate_character(
     first_name: str,
     last_name: str,
@@ -208,35 +262,46 @@ def generate_character(
     selected template's biography is retained. ``existing_characters`` lets
     callers avoid reusing their appearances when an unused template is available.
     """
-    templates = _load_character_templates()
-    used_appearances = {
-        appearance.to_bytes()
-        for existing in existing_characters
-        if (appearance := _find_character_property(existing.properties, "kAppearance"))
-        is not None
-    }
-    available_templates = [
-        template
-        for template in templates
-        if (appearance := _find_character_property(template.properties, "kAppearance"))
-        is not None
-        and appearance.to_bytes() not in used_appearances
+    template_entries, used_appearances = _prepare_character_generation(
+        existing_characters
+    )
+    return _generate_character_from_templates(
+        template_entries,
+        used_appearances,
+        first_name,
+        last_name,
+        nickname,
+        biography,
+    )
+
+
+def generate_characters(
+    requests: Iterable[Mapping[str, str]],
+    *,
+    existing_characters: Iterable[Character] = (),
+) -> list[Character]:
+    """Generate soldiers for name requests using one shared template set.
+
+    Each request must contain ``first_name`` and ``last_name`` and may contain
+    ``nickname``. Name values are used as supplied. Existing and newly generated
+    appearances are avoided while an unused template appearance is available.
+    """
+    request_list = list(requests)
+    if not request_list:
+        return []
+    template_entries, used_appearances = _prepare_character_generation(
+        existing_characters
+    )
+    return [
+        _generate_character_from_templates(
+            template_entries,
+            used_appearances,
+            request["first_name"],
+            request["last_name"],
+            request.get("nickname", ""),
+        )
+        for request in request_list
     ]
-    character = copy.deepcopy(random.choice(available_templates or templates))
-    for name, value in (
-        ("strFirstName", first_name),
-        ("strLastName", last_name),
-        ("strNickName", f"'{nickname}'" if nickname else ""),
-        ("PoolTimestamp", _current_pool_timestamp()),
-        ("CharacterTemplateName", "Soldier"),
-        ("AllowedTypeSoldier", True),
-        ("AllowedTypeVIP", True),
-        ("AllowedTypeDarkVIP", True),
-    ):
-        _set_character_property(character, name, value)
-    if biography:
-        _set_character_property(character, "BackgroundText", biography)
-    return character
 
 
 def read_pool(path: str | Path | bytes) -> Pool:
