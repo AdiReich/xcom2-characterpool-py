@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import copy
 import json
+import random
+import sys
+from collections.abc import Iterable
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -137,6 +142,101 @@ class Pool:
         if document.get("pool_file_name"):
             pool.file_name = str(document["pool_file_name"])
         return pool
+
+
+def _current_pool_timestamp() -> str:
+    now = datetime.now()
+    if sys.platform == "win32":
+        return now.strftime("%B %#d, %Y - %#I:%M %p")
+    return now.strftime("%B %-d, %Y - %-I:%M %p")
+
+
+def _find_character_property(properties: list[Property], name: str) -> Property | None:
+    for prop in properties:
+        if prop.name == name:
+            return prop
+        if prop.type_name == "StructProperty" and isinstance(prop.value, list):
+            nested = _find_character_property(prop.value, name)
+            if nested is not None:
+                return nested
+    return None
+
+
+def _set_character_property(character: Character, name: str, value: Any) -> None:
+    prop = _find_character_property(character.properties, name)
+    if prop is None:
+        raise PoolFormatError(f"Character template is missing property: {name}.")
+    prop.value = value
+    if prop.type_name == "BoolProperty" and prop.raw_body is not None:
+        if len(prop.raw_body) == 1:
+            prop.raw_body = b"\1" if value else b"\0"
+        elif len(prop.raw_body) == 5:
+            prop.raw_body = bytes(4) + (b"\1" if value else b"\0")
+        else:
+            prop.raw_body = None
+    else:
+        prop.raw_body = None
+    prop.original_value = value if prop.raw_body is not None else None
+
+
+def _load_character_templates() -> list[Character]:
+    path = (
+        Path(__file__).resolve().parent
+        / "data"
+        / "Files"
+        / "Templates"
+        / "New Character.txt"
+    )
+    templates = json.loads(path.read_text(encoding="utf-8-sig"))
+    if not isinstance(templates, list) or not templates:
+        raise PoolFormatError("No character templates are available.")
+    return [Character.from_dict(item) for item in templates]
+
+
+def generate_character(
+    first_name: str,
+    last_name: str,
+    nickname: str = "",
+    biography: str = "",
+    *,
+    existing_characters: Iterable[Character] = (),
+) -> Character:
+    """Generate a randomized soldier from bundled templates.
+
+    Name values are used as supplied; callers are responsible for preparing them.
+    ``biography`` sets XCOM's ``BackgroundText`` property; when omitted, the
+    selected template's biography is retained. ``existing_characters`` lets
+    callers avoid reusing their appearances when an unused template is available.
+    """
+    templates = _load_character_templates()
+    used_appearances = {
+        appearance.to_bytes()
+        for existing in existing_characters
+        if (appearance := _find_character_property(existing.properties, "kAppearance"))
+        is not None
+    }
+    available_templates = [
+        template
+        for template in templates
+        if (appearance := _find_character_property(template.properties, "kAppearance"))
+        is not None
+        and appearance.to_bytes() not in used_appearances
+    ]
+    character = copy.deepcopy(random.choice(available_templates or templates))
+    for name, value in (
+        ("strFirstName", first_name),
+        ("strLastName", last_name),
+        ("strNickName", f"'{nickname}'" if nickname else ""),
+        ("PoolTimestamp", _current_pool_timestamp()),
+        ("CharacterTemplateName", "Soldier"),
+        ("AllowedTypeSoldier", True),
+        ("AllowedTypeVIP", True),
+        ("AllowedTypeDarkVIP", True),
+    ):
+        _set_character_property(character, name, value)
+    if biography:
+        _set_character_property(character, "BackgroundText", biography)
+    return character
 
 
 def read_pool(path: str | Path | bytes) -> Pool:

@@ -53,6 +53,16 @@ python -m xcom2_characterpool_py templates --search Kevlar --part-type Torso
 
 `add` randomly selects a Soldier template from the bundled `Templates/New Character.txt` records, based on the supplied character pools. It applies the requested name and always sets the character type and Soldier/VIP/Dark VIP eligibility flags.
 
+Python applications can generate the same randomized soldier directly:
+
+```python
+from xcom2_characterpool_py import generate_character
+
+soldier = generate_character("Jane", "Doe", nickname="Viper")
+```
+
+Pass `biography` to set the soldier's background text, or leave it blank to keep the selected template's biography. Pass `existing_characters` to avoid reusing their appearances when an unused template is available.
+
 For XCOM 2 to load a pool, place the resulting `.bin` file in the game's `CharacterPool/Importable` directory. Common locations are:
 
 - `Documents\My Games\XCOM2\XComGame\CharacterPool\Importable`

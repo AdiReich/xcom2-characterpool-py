@@ -7,6 +7,7 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
+from xcom2_characterpool_py import generate_character
 from xcom2_characterpool_py.cli import _character, main
 from xcom2_characterpool_py.format import Property
 from xcom2_characterpool_py.pool import Character, Pool, read_pool
@@ -381,7 +382,7 @@ class PoolTests(unittest.TestCase):
             unused_template.get("kAppearance")[1].value = 1
 
             with patch(
-                "xcom2_characterpool_py.cli._load_character_templates",
+                "xcom2_characterpool_py.pool._load_character_templates",
                 return_value=[template, unused_template],
             ):
                 result = main(
@@ -422,6 +423,93 @@ class PoolTests(unittest.TestCase):
                 updated_pool.characters[0].to_bytes(),
                 source_pool.characters[0].to_bytes(),
             )
+
+    def test_generate_character_sets_fields_and_preserves_template_biography(
+        self,
+    ) -> None:
+        template = _character("Template", "Soldier")
+        next(
+            prop for prop in template.properties if prop.name == "BackgroundText"
+        ).value = "Template biography"
+        for name in (
+            "AllowedTypeSoldier",
+            "AllowedTypeVIP",
+            "AllowedTypeDarkVIP",
+        ):
+            next(
+                prop for prop in template.properties if prop.name == name
+            ).value = False
+        next(
+            prop for prop in template.properties if prop.name == "CharacterTemplateName"
+        ).value = "ReaperSoldier"
+        original = template.to_bytes()
+
+        with (
+            patch(
+                "xcom2_characterpool_py.pool._load_character_templates",
+                return_value=[template],
+            ),
+            patch(
+                "xcom2_characterpool_py.pool.random.choice",
+                side_effect=lambda items: items[0],
+            ),
+        ):
+            generated = generate_character("Alex", "Kim", "Viper")
+
+        self.assertEqual(generated.get("strFirstName"), "Alex")
+        self.assertEqual(generated.get("strLastName"), "Kim")
+        self.assertEqual(generated.get("strNickName"), "'Viper'")
+        self.assertTrue(generated.get("PoolTimestamp"))
+        self.assertEqual(generated.get("CharacterTemplateName"), "Soldier")
+        self.assertTrue(generated.get("AllowedTypeSoldier"))
+        self.assertTrue(generated.get("AllowedTypeVIP"))
+        self.assertTrue(generated.get("AllowedTypeDarkVIP"))
+        self.assertEqual(generated.get("BackgroundText"), "Template biography")
+        self.assertIsNot(generated, template)
+        self.assertEqual(template.to_bytes(), original)
+
+    def test_generate_character_overrides_biography_and_avoids_used_appearance(
+        self,
+    ) -> None:
+        used_template = _character("Template", "One")
+        available_template = _character("Template", "Two")
+        available_template.get("kAppearance")[1].value = 0
+        next(
+            prop
+            for prop in available_template.properties
+            if prop.name == "BackgroundText"
+        ).value = "Available biography"
+        original_available = available_template.to_bytes()
+
+        with (
+            patch(
+                "xcom2_characterpool_py.pool._load_character_templates",
+                return_value=[used_template, available_template],
+            ),
+            patch(
+                "xcom2_characterpool_py.pool.random.choice",
+                side_effect=lambda items: items[0],
+            ),
+        ):
+            generated = generate_character(
+                "Alex",
+                "Kim",
+                biography="Custom biography",
+                existing_characters=[used_template],
+            )
+
+        self.assertEqual(generated.get("BackgroundText"), "Custom biography")
+        self.assertEqual(
+            next(
+                prop for prop in generated.properties if prop.name == "kAppearance"
+            ).to_bytes(),
+            next(
+                prop
+                for prop in available_template.properties
+                if prop.name == "kAppearance"
+            ).to_bytes(),
+        )
+        self.assertEqual(available_template.to_bytes(), original_available)
 
 
 if __name__ == "__main__":
