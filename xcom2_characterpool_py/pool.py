@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 import json
 import random
 import sys
@@ -111,7 +110,17 @@ class Pool:
         content = bytearray(b"\xff\xff\xff\xff")
         content.extend(write_properties(header))
         content.extend(_write_i32(len(self.characters)))
-        for character in self.characters:
+        characters_without_appearance = [
+            character
+            for character in self.characters
+            if not any(prop.name == "kAppearance" for prop in character.properties)
+        ]
+        characters_with_appearance = [
+            character
+            for character in self.characters
+            if any(prop.name == "kAppearance" for prop in character.properties)
+        ]
+        for character in characters_without_appearance + characters_with_appearance:
             content.extend(character.to_bytes())
         return bytes(content)
 
@@ -144,6 +153,57 @@ class Pool:
         return pool
 
 
+def _empty_character_appearance() -> list[Property]:
+    return [
+        Property("nmHead", "NameProperty", ""),
+        Property("iGender", "IntProperty", 1),
+        Property("iRace", "IntProperty", 0),
+        Property("nmHaircut", "NameProperty", ""),
+        Property("iHairColor", "IntProperty", 0),
+        Property("iFacialHair", "IntProperty", 0),
+        Property("nmBeard", "NameProperty", ""),
+        Property("iSkinColor", "IntProperty", 0),
+        Property("iEyeColor", "IntProperty", 0),
+        Property("nmFlag", "NameProperty", ""),
+        Property("iVoice", "IntProperty", 0),
+        Property("iAttitude", "IntProperty", 0),
+        Property("iArmorDeco", "IntProperty", 0),
+        Property("iArmorTint", "IntProperty", 0),
+        Property("iArmorTintSecondary", "IntProperty", 0),
+        Property("iWeaponTint", "IntProperty", 0),
+        Property("iTattooTint", "IntProperty", 0),
+        Property("nmWeaponPattern", "NameProperty", ""),
+        Property("nmPawn", "NameProperty", "None"),
+        Property("nmTorso", "NameProperty", ""),
+        Property("nmArms", "NameProperty", ""),
+        Property("nmLegs", "NameProperty", ""),
+        Property("nmHelmet", "NameProperty", ""),
+        Property("nmEye", "NameProperty", "DefaultEyes"),
+        Property("nmTeeth", "NameProperty", "DefaultTeeth"),
+        Property("nmFacePropLower", "NameProperty", ""),
+        Property("nmFacePropUpper", "NameProperty", ""),
+        Property("nmPatterns", "NameProperty", ""),
+        Property("nmVoice", "NameProperty", ""),
+        Property("nmLanguage", "NameProperty", "None"),
+        Property("nmTattoo_LeftArm", "NameProperty", ""),
+        Property("nmTattoo_RightArm", "NameProperty", ""),
+        Property("nmScars", "NameProperty", ""),
+        Property("nmTorso_Underlay", "NameProperty", ""),
+        Property("nmArms_Underlay", "NameProperty", ""),
+        Property("nmLegs_Underlay", "NameProperty", ""),
+        Property("nmFacePaint", "NameProperty", ""),
+        Property("nmLeftArm", "NameProperty", ""),
+        Property("nmRightArm", "NameProperty", ""),
+        Property("nmLeftArmDeco", "NameProperty", ""),
+        Property("nmRightArmDeco", "NameProperty", ""),
+        Property("nmLeftForearm", "NameProperty", ""),
+        Property("nmRightForearm", "NameProperty", ""),
+        Property("nmThighs", "NameProperty", ""),
+        Property("nmShins", "NameProperty", "None"),
+        Property("nmTorsoDeco", "NameProperty", ""),
+    ]
+
+
 def _current_pool_timestamp() -> str:
     now = datetime.now()
     if sys.platform == "win32":
@@ -151,100 +211,147 @@ def _current_pool_timestamp() -> str:
     return now.strftime("%B %-d, %Y - %-I:%M %p")
 
 
-def _find_character_property(properties: list[Property], name: str) -> Property | None:
-    for prop in properties:
-        if prop.name == name:
-            return prop
-        if prop.type_name == "StructProperty" and isinstance(prop.value, list):
-            nested = _find_character_property(prop.value, name)
-            if nested is not None:
-                return nested
-    return None
-
-
-def _set_character_property(character: Character, name: str, value: Any) -> None:
-    prop = _find_character_property(character.properties, name)
-    if prop is None:
-        raise PoolFormatError(f"Character template is missing property: {name}.")
-    prop.value = value
-    if prop.type_name == "BoolProperty" and prop.raw_body is not None:
-        if len(prop.raw_body) == 1:
-            prop.raw_body = b"\1" if value else b"\0"
-        elif len(prop.raw_body) == 5:
-            prop.raw_body = bytes(4) + (b"\1" if value else b"\0")
-        else:
-            prop.raw_body = None
-    else:
-        prop.raw_body = None
-    prop.original_value = value if prop.raw_body is not None else None
-
-
-def _load_character_templates() -> list[Character]:
+def _load_character_generation_rules() -> dict[str, Any]:
     path = (
         Path(__file__).resolve().parent
         / "data"
         / "Files"
         / "Templates"
-        / "New Character.txt"
+        / "Character Generation Rules.json"
     )
-    templates = json.loads(path.read_text(encoding="utf-8-sig"))
-    if not isinstance(templates, list) or not templates:
-        raise PoolFormatError("No character templates are available.")
-    return [Character.from_dict(item) for item in templates]
+    try:
+        rules = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise PoolFormatError(
+            f"Could not read character generation rules: {exc}"
+        ) from exc
+    if not isinstance(rules, dict) or not isinstance(
+        rules.get("character_template_names"), dict
+    ):
+        raise PoolFormatError("Character generation rules are invalid.")
+    return rules
 
 
-def _prepare_character_generation(
-    existing_characters: Iterable[Character],
-) -> tuple[list[tuple[Character, bytes | None]], set[bytes]]:
-    templates = _load_character_templates()
-    template_entries = []
-    for template in templates:
-        appearance = _find_character_property(template.properties, "kAppearance")
-        template_entries.append(
-            (template, appearance.to_bytes() if appearance is not None else None)
-        )
-    used_appearances = {
-        appearance.to_bytes()
-        for existing in existing_characters
-        if (appearance := _find_character_property(existing.properties, "kAppearance"))
-        is not None
-    }
-    return template_entries, used_appearances
+def _load_character_generation_data() -> dict[str, Any]:
+    path = (
+        Path(__file__).resolve().parent
+        / "data"
+        / "Files"
+        / "Templates"
+        / "Character Generation Data.json"
+    )
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise PoolFormatError(
+            f"Could not read character generation data: {exc}"
+        ) from exc
+    if not isinstance(data, dict) or not isinstance(data.get("Soldier"), dict):
+        raise PoolFormatError("Character generation data is invalid.")
+    return data
 
 
-def _generate_character_from_templates(
-    template_entries: list[tuple[Character, bytes | None]],
-    used_appearances: set[bytes],
+def _generate_character(
+    generation_rules: dict[str, Any],
+    generation_data: dict[str, Any],
     first_name: str,
     last_name: str,
     nickname: str,
-    biography: str = "",
+    character_template_name: str | None = None,
+    soldier_class_template_name: str | None = None,
+    country: str | None = None,
+    background_text: str | None = None,
 ) -> Character:
-    available_templates = [
-        (template, appearance)
-        for template, appearance in template_entries
-        if appearance is not None and appearance not in used_appearances
-    ]
-    selected_template, selected_appearance = random.choice(
-        available_templates or template_entries
+    template_name = character_template_name or generation_rules.get(
+        "default_character_template_name"
     )
-    character = copy.deepcopy(selected_template)
-    for name, value in (
-        ("strFirstName", first_name),
-        ("strLastName", last_name),
-        ("strNickName", f"'{nickname}'" if nickname else ""),
-        ("PoolTimestamp", _current_pool_timestamp()),
-        ("CharacterTemplateName", "Soldier"),
-        ("AllowedTypeSoldier", True),
-        ("AllowedTypeVIP", True),
-        ("AllowedTypeDarkVIP", True),
-    ):
-        _set_character_property(character, name, value)
-    if biography:
-        _set_character_property(character, "BackgroundText", biography)
-    if selected_appearance is not None:
-        used_appearances.add(selected_appearance)
-    return character
+    template_rules = generation_rules["character_template_names"].get(template_name)
+    if template_rules is None:
+        allowed_names = ", ".join(generation_rules["character_template_names"])
+        raise ValueError(
+            f"Unsupported character_template_name {template_name!r}; "
+            f"choose one of: {allowed_names}."
+        )
+
+    class_names = template_rules.get("soldier_classes", [])
+    if not class_names:
+        raise PoolFormatError(
+            f"No soldier classes are configured for {template_name!r}."
+        )
+    if soldier_class_template_name is not None:
+        if soldier_class_template_name not in class_names:
+            allowed_classes = ", ".join(class_names)
+            raise ValueError(
+                f"Unsupported soldier_class_template_name "
+                f"{soldier_class_template_name!r} for {template_name!r}; "
+                f"choose one of: {allowed_classes}."
+            )
+        selected_class = soldier_class_template_name
+    else:
+        selected_class = random.choice(class_names)
+
+    template_data = generation_data.get(template_name, {})
+    soldier_data = generation_data["Soldier"]
+    if template_rules.get("country_source") == "generation_data":
+        country_names = template_data.get("countries", [])
+    else:
+        country_names = template_rules.get("countries", [])
+    if not country_names:
+        raise PoolFormatError(f"No countries are configured for {template_name!r}.")
+    if country is not None:
+        if country not in country_names:
+            allowed_countries = ", ".join(country_names)
+            raise ValueError(
+                f"Unsupported country {country!r} for {template_name!r}; "
+                f"choose one of: {allowed_countries}."
+            )
+        selected_country = country
+    else:
+        selected_country = random.choice(country_names)
+
+    limits = generation_rules["field_limits"]
+    first_name = first_name[: limits["strFirstName"]]
+    last_name = last_name[: limits["strLastName"]]
+    nickname = nickname[: limits["strNickName"]]
+    if not background_text:
+        backgrounds = template_data.get("background_texts") or soldier_data.get(
+            "background_texts", []
+        )
+        if not backgrounds:
+            raise PoolFormatError(
+                f"No background text is configured for {template_name!r}."
+            )
+        background_text = random.choice(backgrounds)
+    background_text = background_text[: limits["BackgroundText"]]
+    return Character(
+        [
+            Property("strFirstName", "StrProperty", first_name),
+            Property("strLastName", "StrProperty", last_name),
+            Property(
+                "strNickName",
+                "StrProperty",
+                f"'{nickname}'" if nickname else "",
+            ),
+            Property("m_SoldierClassTemplateName", "NameProperty", selected_class),
+            Property("CharacterTemplateName", "NameProperty", template_name),
+            Property("Country", "NameProperty", selected_country),
+            Property(
+                "AllowedTypeSoldier",
+                "BoolProperty",
+                generation_rules["allowed_type_soldier"],
+            ),
+            Property(
+                "AllowedTypeVIP", "BoolProperty", template_rules["allowed_type_vip"]
+            ),
+            Property(
+                "AllowedTypeDarkVIP",
+                "BoolProperty",
+                template_rules["allowed_type_dark_vip"],
+            ),
+            Property("PoolTimestamp", "StrProperty", _current_pool_timestamp()),
+            Property("BackgroundText", "StrProperty", background_text),
+        ]
+    )
 
 
 def generate_character(
@@ -253,25 +360,32 @@ def generate_character(
     nickname: str = "",
     biography: str = "",
     *,
+    character_template_name: str | None = None,
+    soldier_class_template_name: str | None = None,
+    country: str | None = None,
+    background_text: str | None = None,
     existing_characters: Iterable[Character] = (),
 ) -> Character:
     """Generate a randomized soldier from bundled templates.
 
     Name values are used as supplied; callers are responsible for preparing them.
-    ``biography`` sets XCOM's ``BackgroundText`` property; when omitted, the
-    selected template's biography is retained. ``existing_characters`` lets
-    callers avoid reusing their appearances when an unused template is available.
+    ``biography`` (or ``background_text``) sets XCOM's ``BackgroundText``;
+    when omitted, a background is selected from the extracted generation data.
+    Appearance data is omitted so the game can generate it. The
+    ``existing_characters`` argument is retained for compatibility.
     """
-    template_entries, used_appearances = _prepare_character_generation(
-        existing_characters
-    )
-    return _generate_character_from_templates(
-        template_entries,
-        used_appearances,
+    generation_rules = _load_character_generation_rules()
+    generation_data = _load_character_generation_data()
+    return _generate_character(
+        generation_rules,
+        generation_data,
         first_name,
         last_name,
         nickname,
-        biography,
+        character_template_name,
+        soldier_class_template_name,
+        country,
+        background_text if background_text is not None else biography,
     )
 
 
@@ -280,25 +394,29 @@ def generate_characters(
     *,
     existing_characters: Iterable[Character] = (),
 ) -> list[Character]:
-    """Generate soldiers for name requests using one shared template set.
+    """Generate soldiers for name requests using shared rules and data.
 
     Each request must contain ``first_name`` and ``last_name`` and may contain
-    ``nickname``. Name values are used as supplied. Existing and newly generated
-    appearances are avoided while an unused template appearance is available.
+    ``nickname``, ``character_template_name``, ``soldier_class_template_name``,
+    ``country``, and ``background_text`` (or ``biography``). Appearance data is
+    omitted so the game can generate it.
     """
     request_list = list(requests)
     if not request_list:
         return []
-    template_entries, used_appearances = _prepare_character_generation(
-        existing_characters
-    )
+    generation_rules = _load_character_generation_rules()
+    generation_data = _load_character_generation_data()
     return [
-        _generate_character_from_templates(
-            template_entries,
-            used_appearances,
+        _generate_character(
+            generation_rules,
+            generation_data,
             request["first_name"],
             request["last_name"],
             request.get("nickname", ""),
+            request.get("character_template_name"),
+            request.get("soldier_class_template_name"),
+            request.get("country"),
+            request.get("background_text", request.get("biography")),
         )
         for request in request_list
     ]

@@ -1,0 +1,56 @@
+{
+    "default_character_template_name": "Soldier",
+    "allowed_type_soldier": true,
+    "field_limits": {
+        "strFirstName": 11,
+        "strLastName": 15,
+        "strNickName": 11,
+        "BackgroundText": 2000
+    },
+    "character_template_names": {
+        "Soldier": {
+            "soldier_classes": [
+                "Ranger",
+                "Sharpshooter",
+                "Grenadier",
+                "Specialist",
+                "PsiOperative"
+            ],
+            "country_source": "generation_data",
+            "allowed_type_vip": true,
+            "allowed_type_dark_vip": true
+        },
+        "SkirmisherSoldier": {
+            "soldier_classes": [
+                "Skirmisher"
+            ],
+            "country_source": "generation_data",
+            "allowed_type_vip": false,
+            "allowed_type_dark_vip": true
+        },
+        "ReaperSoldier": {
+            "soldier_classes": [
+                "Reaper"
+            ],
+            "country_source": "generation_data",
+            "allowed_type_vip": false,
+            "allowed_type_dark_vip": true
+        },
+        "TemplarSoldier": {
+            "soldier_classes": [
+                "Templar"
+            ],
+            "country_source": "generation_data",
+            "allowed_type_vip": false,
+            "allowed_type_dark_vip": true
+        },
+        "SparkSoldier": {
+            "soldier_classes": [
+                "Spark"
+            ],
+            "country_source": "generation_data",
+            "allowed_type_vip": false,
+            "allowed_type_dark_vip": false
+        }
+    }
+}

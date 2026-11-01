@@ -11,6 +11,7 @@ from .pool import (
     Character,
     Pool,
     _current_pool_timestamp,
+    _empty_character_appearance,
     generate_character,
     load_json,
     read_pool,
@@ -29,54 +30,6 @@ def _read_asset(path: Path) -> str:
 
 
 def _character(first_name: str, last_name: str, nickname: str = "") -> Character:
-    appearance = [
-        Property("nmHead", "NameProperty", ""),
-        Property("iGender", "IntProperty", 1),
-        Property("iRace", "IntProperty", 0),
-        Property("nmHaircut", "NameProperty", ""),
-        Property("iHairColor", "IntProperty", 0),
-        Property("iFacialHair", "IntProperty", 0),
-        Property("nmBeard", "NameProperty", ""),
-        Property("iSkinColor", "IntProperty", 0),
-        Property("iEyeColor", "IntProperty", 0),
-        Property("nmFlag", "NameProperty", ""),
-        Property("iVoice", "IntProperty", 0),
-        Property("iAttitude", "IntProperty", 0),
-        Property("iArmorDeco", "IntProperty", 0),
-        Property("iArmorTint", "IntProperty", 0),
-        Property("iArmorTintSecondary", "IntProperty", 0),
-        Property("iWeaponTint", "IntProperty", 0),
-        Property("iTattooTint", "IntProperty", 0),
-        Property("nmWeaponPattern", "NameProperty", ""),
-        Property("nmPawn", "NameProperty", "None"),
-        Property("nmTorso", "NameProperty", ""),
-        Property("nmArms", "NameProperty", ""),
-        Property("nmLegs", "NameProperty", ""),
-        Property("nmHelmet", "NameProperty", ""),
-        Property("nmEye", "NameProperty", "DefaultEyes"),
-        Property("nmTeeth", "NameProperty", "DefaultTeeth"),
-        Property("nmFacePropLower", "NameProperty", ""),
-        Property("nmFacePropUpper", "NameProperty", ""),
-        Property("nmPatterns", "NameProperty", ""),
-        Property("nmVoice", "NameProperty", ""),
-        Property("nmLanguage", "NameProperty", "None"),
-        Property("nmTattoo_LeftArm", "NameProperty", ""),
-        Property("nmTattoo_RightArm", "NameProperty", ""),
-        Property("nmScars", "NameProperty", ""),
-        Property("nmTorso_Underlay", "NameProperty", ""),
-        Property("nmArms_Underlay", "NameProperty", ""),
-        Property("nmLegs_Underlay", "NameProperty", ""),
-        Property("nmFacePaint", "NameProperty", ""),
-        Property("nmLeftArm", "NameProperty", ""),
-        Property("nmRightArm", "NameProperty", ""),
-        Property("nmLeftArmDeco", "NameProperty", ""),
-        Property("nmRightArmDeco", "NameProperty", ""),
-        Property("nmLeftForearm", "NameProperty", ""),
-        Property("nmRightForearm", "NameProperty", ""),
-        Property("nmThighs", "NameProperty", ""),
-        Property("nmShins", "NameProperty", "None"),
-        Property("nmTorsoDeco", "NameProperty", ""),
-    ]
     return Character(
         [
             Property("strFirstName", "StrProperty", first_name),
@@ -85,7 +38,11 @@ def _character(first_name: str, last_name: str, nickname: str = "") -> Character
             Property("CharacterTemplateName", "NameProperty", "Soldier"),
             Property("m_SoldierClassTemplateName", "NameProperty", "Rookie"),
             Property("Country", "NameProperty", "Country_USA"),
-            Property("kAppearance", "StructProperty", appearance),
+            Property(
+                "kAppearance",
+                "StructProperty",
+                _empty_character_appearance(),
+            ),
             Property("AllowedTypeSoldier", "BoolProperty", True),
             Property("AllowedTypeVIP", "BoolProperty", False),
             Property("AllowedTypeDarkVIP", "BoolProperty", False),
@@ -237,7 +194,7 @@ def _cmd_new(args: argparse.Namespace) -> int:
     characters = (
         []
         if args.empty
-        else [_character(args.first_name, args.last_name, args.nickname)]
+        else [generate_character(args.first_name, args.last_name, args.nickname)]
     )
     pool = Pool([Property("PoolFileName", "StrProperty", name)], characters)
     write_pool(pool, args.output)

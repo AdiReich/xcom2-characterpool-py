@@ -13,6 +13,19 @@ from xcom2_characterpool_py.format import Property
 from xcom2_characterpool_py.pool import Character, Pool, read_pool
 
 
+def _generation_data() -> dict[str, dict[str, list[str]]]:
+    return {
+        "Soldier": {
+            "countries": ["Country_USA", "Country_Poland"],
+            "background_texts": ["Template biography", "Available biography"],
+        },
+        "SkirmisherSoldier": {"countries": ["Country_Skirmisher"]},
+        "ReaperSoldier": {"countries": ["Country_Reaper"]},
+        "TemplarSoldier": {"countries": ["Country_Templar"]},
+        "SparkSoldier": {"countries": ["Country_Spark"]},
+    }
+
+
 class PoolTests(unittest.TestCase):
     def make_pool(self) -> Pool:
         return Pool(
@@ -32,6 +45,20 @@ class PoolTests(unittest.TestCase):
         pool = self.make_pool()
 
         self.assertEqual(read_pool(pool.to_bytes()).to_bytes(), pool.to_bytes())
+
+    def test_characters_without_appearance_are_serialized_first(self) -> None:
+        appearance_character = _character("Ada", "Test")
+        generated_character = Character(
+            [Property("strFirstName", "StrProperty", "Grace")]
+        )
+        pool = Pool([], [appearance_character, generated_character])
+
+        serialized_characters = read_pool(pool.to_bytes()).characters
+
+        self.assertEqual(
+            [character.full_name for character in serialized_characters],
+            ["Grace", "Ada Test"],
+        )
 
     def test_pool_header_property_order_is_preserved(self) -> None:
         pool = Pool(
@@ -356,34 +383,53 @@ class PoolTests(unittest.TestCase):
             self.assertEqual(result, 0)
             self.assertEqual(len(read_pool(target).characters), 1)
 
-    def test_add_uses_random_template_and_forces_soldier_flags(self) -> None:
+    def test_new_generates_starter_with_allowed_soldier_class(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "new-pool.bin"
+            with patch(
+                "xcom2_characterpool_py.pool.random.choice",
+                side_effect=lambda values: values[0],
+            ):
+                result = main(
+                    [
+                        "new",
+                        str(target),
+                        "--first-name",
+                        "Alex",
+                        "--last-name",
+                        "Kim",
+                        "--nickname",
+                        "Viper",
+                    ]
+                )
+
+            self.assertEqual(result, 0)
+            character = read_pool(target).characters[0]
+            self.assertEqual(character.get("strFirstName"), "Alex")
+            self.assertEqual(character.get("strLastName"), "Kim")
+            self.assertEqual(character.get("strNickName"), "'Viper'")
+            self.assertEqual(character.get("CharacterTemplateName"), "Soldier")
+            self.assertIn(
+                character.get("m_SoldierClassTemplateName"),
+                {"Ranger", "Sharpshooter", "Grenadier", "Specialist", "PsiOperative"},
+            )
+
+    def test_add_generates_required_fields_and_soldier_flags(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "source.bin"
             target = Path(directory) / "target.bin"
             source_pool = self.make_pool()
             source.write_bytes(source_pool.to_bytes())
-            template = _character("", "")
-            template.get("kAppearance")[1].value = 0
-            for name in (
-                "AllowedTypeSoldier",
-                "AllowedTypeVIP",
-                "AllowedTypeDarkVIP",
-            ):
-                prop = next(prop for prop in template.properties if prop.name == name)
-                prop.value = False
-                prop.raw_body = b"\0"
-                prop.original_value = False
-            next(
-                prop
-                for prop in template.properties
-                if prop.name == "CharacterTemplateName"
-            ).value = "ReaperSoldier"
-            unused_template = _character("", "")
-            unused_template.get("kAppearance")[1].value = 1
 
-            with patch(
-                "xcom2_characterpool_py.pool._load_character_templates",
-                return_value=[template, unused_template],
+            with (
+                patch(
+                    "xcom2_characterpool_py.pool._load_character_generation_data",
+                    return_value=_generation_data(),
+                ),
+                patch(
+                    "xcom2_characterpool_py.pool.random.choice",
+                    side_effect=lambda values: values[0],
+                ),
             ):
                 result = main(
                     [
@@ -402,7 +448,7 @@ class PoolTests(unittest.TestCase):
 
             self.assertEqual(result, 0)
             updated_pool = read_pool(target)
-            added = updated_pool.characters[-1]
+            added = updated_pool.characters[0]
             self.assertEqual(added.get("strFirstName"), "Alex")
             self.assertEqual(added.get("strLastName"), "Kim")
             self.assertEqual(added.get("strNickName"), "'Viper'")
@@ -411,7 +457,9 @@ class PoolTests(unittest.TestCase):
             self.assertTrue(added.get("AllowedTypeSoldier"))
             self.assertTrue(added.get("AllowedTypeVIP"))
             self.assertTrue(added.get("AllowedTypeDarkVIP"))
-            self.assertEqual(added.get("kAppearance")[1].value, 0)
+            self.assertEqual(added.get("Country"), "Country_USA")
+            self.assertEqual(added.get("BackgroundText"), "Template biography")
+            self.assertIsNone(added.get("kAppearance"))
             for name in (
                 "AllowedTypeSoldier",
                 "AllowedTypeVIP",
@@ -420,71 +468,51 @@ class PoolTests(unittest.TestCase):
                 prop = next(prop for prop in added.properties if prop.name == name)
                 self.assertEqual(prop.raw_body, b"\1")
             self.assertEqual(
-                updated_pool.characters[0].to_bytes(),
+                updated_pool.characters[1].to_bytes(),
                 source_pool.characters[0].to_bytes(),
             )
 
-    def test_generate_character_sets_fields_and_preserves_template_biography(
+    def test_generate_character_uses_extracted_country_and_background_data(
         self,
     ) -> None:
-        template = _character("Template", "Soldier")
-        next(
-            prop for prop in template.properties if prop.name == "BackgroundText"
-        ).value = "Template biography"
-        for name in (
-            "AllowedTypeSoldier",
-            "AllowedTypeVIP",
-            "AllowedTypeDarkVIP",
-        ):
-            next(
-                prop for prop in template.properties if prop.name == name
-            ).value = False
-        next(
-            prop for prop in template.properties if prop.name == "CharacterTemplateName"
-        ).value = "ReaperSoldier"
-        original = template.to_bytes()
-
-        with (
-            patch(
-                "xcom2_characterpool_py.pool._load_character_templates",
-                return_value=[template],
-            ),
-            patch(
-                "xcom2_characterpool_py.pool.random.choice",
-                side_effect=lambda items: items[0],
-            ),
+        with patch(
+            "xcom2_characterpool_py.pool.random.choice",
+            side_effect=lambda items: items[0],
         ):
             generated = generate_character("Alex", "Kim", "Viper")
 
+        data_path = (
+            Path(__file__).resolve().parents[1]
+            / "xcom2_characterpool_py"
+            / "data"
+            / "Files"
+            / "Templates"
+            / "Character Generation Data.json"
+        )
+        soldier_data = json.loads(data_path.read_text(encoding="utf-8"))["Soldier"]
         self.assertEqual(generated.get("strFirstName"), "Alex")
         self.assertEqual(generated.get("strLastName"), "Kim")
         self.assertEqual(generated.get("strNickName"), "'Viper'")
         self.assertTrue(generated.get("PoolTimestamp"))
         self.assertEqual(generated.get("CharacterTemplateName"), "Soldier")
+        self.assertIn(
+            generated.get("m_SoldierClassTemplateName"),
+            {"Ranger", "Sharpshooter", "Grenadier", "Specialist", "PsiOperative"},
+        )
+        self.assertIn(generated.get("Country"), soldier_data["countries"])
         self.assertTrue(generated.get("AllowedTypeSoldier"))
         self.assertTrue(generated.get("AllowedTypeVIP"))
         self.assertTrue(generated.get("AllowedTypeDarkVIP"))
-        self.assertEqual(generated.get("BackgroundText"), "Template biography")
-        self.assertIsNot(generated, template)
-        self.assertEqual(template.to_bytes(), original)
+        self.assertIn(generated.get("BackgroundText"), soldier_data["background_texts"])
+        self.assertIsNone(generated.get("kAppearance"))
 
-    def test_generate_character_overrides_biography_and_avoids_used_appearance(
+    def test_generate_character_overrides_biography_and_omits_appearance(
         self,
     ) -> None:
-        used_template = _character("Template", "One")
-        available_template = _character("Template", "Two")
-        available_template.get("kAppearance")[1].value = 0
-        next(
-            prop
-            for prop in available_template.properties
-            if prop.name == "BackgroundText"
-        ).value = "Available biography"
-        original_available = available_template.to_bytes()
-
         with (
             patch(
-                "xcom2_characterpool_py.pool._load_character_templates",
-                return_value=[used_template, available_template],
+                "xcom2_characterpool_py.pool._load_character_generation_data",
+                return_value=_generation_data(),
             ),
             patch(
                 "xcom2_characterpool_py.pool.random.choice",
@@ -495,41 +523,30 @@ class PoolTests(unittest.TestCase):
                 "Alex",
                 "Kim",
                 biography="Custom biography",
-                existing_characters=[used_template],
+                existing_characters=[_character("Existing", "Soldier")],
             )
 
         self.assertEqual(generated.get("BackgroundText"), "Custom biography")
-        self.assertEqual(
-            next(
-                prop for prop in generated.properties if prop.name == "kAppearance"
-            ).to_bytes(),
-            next(
-                prop
-                for prop in available_template.properties
-                if prop.name == "kAppearance"
-            ).to_bytes(),
-        )
-        self.assertEqual(available_template.to_bytes(), original_available)
+        self.assertIsNone(generated.get("kAppearance"))
 
-    def test_generate_characters_empty_input_does_not_load_templates(self) -> None:
+    def test_generate_characters_empty_input_does_not_load_data(self) -> None:
         with patch(
-            "xcom2_characterpool_py.pool._load_character_templates",
-        ) as load_templates:
+            "xcom2_characterpool_py.pool._load_character_generation_data",
+        ) as load_data:
             self.assertEqual(generate_characters([]), [])
 
-        load_templates.assert_not_called()
+        load_data.assert_not_called()
 
     def test_generate_characters_preserves_request_order_and_names(self) -> None:
-        template = _character("Template", "Soldier")
         requests = [
             {"first_name": "Ada", "last_name": "Lovelace", "nickname": "Ace"},
             {"first_name": "Grace", "last_name": "Hopper"},
         ]
         with (
             patch(
-                "xcom2_characterpool_py.pool._load_character_templates",
-                return_value=[template],
-            ) as load_templates,
+                "xcom2_characterpool_py.pool._load_character_generation_data",
+                return_value=_generation_data(),
+            ) as load_data,
             patch(
                 "xcom2_characterpool_py.pool.random.choice",
                 side_effect=lambda items: items[0],
@@ -546,21 +563,75 @@ class PoolTests(unittest.TestCase):
         )
         self.assertEqual(generated[0].get("strNickName"), "'Ace'")
         self.assertEqual(generated[1].get("strNickName"), "")
-        load_templates.assert_called_once_with()
+        load_data.assert_called_once_with()
 
-    def test_generate_characters_avoids_existing_and_tracks_generated_appearances(
+    def test_generate_characters_accepts_optional_generation_fields(self) -> None:
+        with (
+            patch(
+                "xcom2_characterpool_py.pool._load_character_generation_data",
+                return_value=_generation_data(),
+            ),
+            patch(
+                "xcom2_characterpool_py.pool.random.choice",
+                side_effect=lambda values: values[0],
+            ),
+        ):
+            generated = generate_characters(
+                [
+                    {
+                        "first_name": "Mara",
+                        "last_name": "Venn",
+                        "character_template_name": "TemplarSoldier",
+                        "soldier_class_template_name": "Templar",
+                        "country": "Country_Templar",
+                        "background_text": "Custom background",
+                    }
+                ]
+            )[0]
+
+        self.assertEqual(generated.get("CharacterTemplateName"), "TemplarSoldier")
+        self.assertEqual(generated.get("m_SoldierClassTemplateName"), "Templar")
+        self.assertEqual(generated.get("Country"), "Country_Templar")
+        self.assertFalse(generated.get("AllowedTypeVIP"))
+        self.assertTrue(generated.get("AllowedTypeDarkVIP"))
+        self.assertEqual(generated.get("BackgroundText"), "Custom background")
+
+    def test_faction_countries_are_loaded_from_generation_data(self) -> None:
+        faction_types = (
+            ("SkirmisherSoldier", "Skirmisher", "Country_Skirmisher"),
+            ("ReaperSoldier", "Reaper", "Country_Reaper"),
+            ("TemplarSoldier", "Templar", "Country_Templar"),
+            ("SparkSoldier", "Spark", "Country_Spark"),
+        )
+        with patch(
+            "xcom2_characterpool_py.pool.random.choice",
+            side_effect=lambda values: values[0],
+        ):
+            generated = [
+                generate_character(
+                    "Test",
+                    "Soldier",
+                    character_template_name=template_name,
+                    soldier_class_template_name=soldier_class,
+                    country=country,
+                )
+                for template_name, soldier_class, country in faction_types
+            ]
+
+        self.assertEqual(
+            [character.get("Country") for character in generated],
+            [country for _, _, country in faction_types],
+        )
+
+    def test_generate_characters_omit_appearance_with_existing_characters(
         self,
     ) -> None:
-        used_template = _character("Template", "Used")
-        first_available = _character("Template", "First")
-        second_available = _character("Template", "Second")
-        first_available.get("kAppearance")[0].value = "head-one"
-        second_available.get("kAppearance")[0].value = "head-two"
+        existing = _character("Existing", "Soldier")
 
         with (
             patch(
-                "xcom2_characterpool_py.pool._load_character_templates",
-                return_value=[used_template, first_available, second_available],
+                "xcom2_characterpool_py.pool._load_character_generation_data",
+                return_value=_generation_data(),
             ),
             patch(
                 "xcom2_characterpool_py.pool.random.choice",
@@ -572,25 +643,20 @@ class PoolTests(unittest.TestCase):
                     {"first_name": "One", "last_name": "Name"},
                     {"first_name": "Two", "last_name": "Name"},
                 ],
-                existing_characters=[used_template],
+                existing_characters=[existing],
             )
 
-        appearance_ids = [
-            character.get("kAppearance")[0].value for character in generated
-        ]
-        self.assertEqual(appearance_ids, ["head-one", "head-two"])
+        self.assertTrue(
+            all(character.get("kAppearance") is None for character in generated)
+        )
 
-    def test_generate_characters_reuses_appearances_after_unique_options_run_out(
+    def test_generate_characters_omit_appearance_for_batch(
         self,
     ) -> None:
-        first_template = _character("Template", "First")
-        second_template = _character("Template", "Second")
-        second_template.get("kAppearance")[0].value = "head-two"
-
         with (
             patch(
-                "xcom2_characterpool_py.pool._load_character_templates",
-                return_value=[first_template, second_template],
+                "xcom2_characterpool_py.pool._load_character_generation_data",
+                return_value=_generation_data(),
             ),
             patch(
                 "xcom2_characterpool_py.pool.random.choice",
@@ -605,23 +671,70 @@ class PoolTests(unittest.TestCase):
                 ]
             )
 
-        appearance_ids = [
-            character.get("kAppearance")[0].value for character in generated
-        ]
-        self.assertEqual(appearance_ids, ["", "head-two", ""])
+        self.assertTrue(
+            all(character.get("kAppearance") is None for character in generated)
+        )
 
-    def test_generate_characters_does_not_mutate_existing_characters_or_templates(
+    def test_generate_character_applies_template_rules_and_limits(self) -> None:
+        with (
+            patch(
+                "xcom2_characterpool_py.pool._load_character_generation_data",
+                return_value=_generation_data(),
+            ),
+            patch(
+                "xcom2_characterpool_py.pool.random.choice",
+                side_effect=lambda values: values[0],
+            ),
+        ):
+            generated = generate_character(
+                "A" * 12,
+                "L" * 16,
+                "N" * 12,
+                character_template_name="SparkSoldier",
+                soldier_class_template_name="Spark",
+                country="Country_Spark",
+                background_text="B" * 2001,
+            )
+
+        self.assertEqual(generated.get("strFirstName"), "A" * 11)
+        self.assertEqual(generated.get("strLastName"), "L" * 15)
+        self.assertEqual(generated.get("strNickName"), "'" + "N" * 11 + "'")
+        self.assertEqual(generated.get("CharacterTemplateName"), "SparkSoldier")
+        self.assertEqual(generated.get("m_SoldierClassTemplateName"), "Spark")
+        self.assertEqual(generated.get("Country"), "Country_Spark")
+        self.assertTrue(generated.get("AllowedTypeSoldier"))
+        self.assertFalse(generated.get("AllowedTypeVIP"))
+        self.assertFalse(generated.get("AllowedTypeDarkVIP"))
+        self.assertEqual(generated.get("BackgroundText"), "B" * 2000)
+        self.assertIsNone(generated.get("kAppearance"))
+
+    def test_generate_character_rejects_class_for_wrong_template_type(self) -> None:
+        with (
+            patch(
+                "xcom2_characterpool_py.pool._load_character_generation_data",
+                return_value=_generation_data(),
+            ),
+            self.assertRaisesRegex(
+                ValueError, "Unsupported soldier_class_template_name"
+            ),
+        ):
+            generate_character(
+                "Alex",
+                "Kim",
+                character_template_name="ReaperSoldier",
+                soldier_class_template_name="Ranger",
+            )
+
+    def test_generate_characters_does_not_mutate_existing_characters(
         self,
     ) -> None:
         existing = _character("Existing", "Soldier")
-        template = _character("Template", "Soldier")
         original_existing = existing.to_bytes()
-        original_template = template.to_bytes()
 
         with (
             patch(
-                "xcom2_characterpool_py.pool._load_character_templates",
-                return_value=[template],
+                "xcom2_characterpool_py.pool._load_character_generation_data",
+                return_value=_generation_data(),
             ),
             patch(
                 "xcom2_characterpool_py.pool.random.choice",
@@ -634,8 +747,8 @@ class PoolTests(unittest.TestCase):
             )[0]
 
         self.assertEqual(existing.to_bytes(), original_existing)
-        self.assertEqual(template.to_bytes(), original_template)
-        self.assertIsNot(generated, template)
+        self.assertIsNot(generated, existing)
+        self.assertIsNone(generated.get("kAppearance"))
 
 
 if __name__ == "__main__":

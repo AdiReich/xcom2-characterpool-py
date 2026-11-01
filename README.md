@@ -51,7 +51,11 @@ python -m xcom2_characterpool_py templates --search Kevlar --part-type Torso
 
 `set` accepts any character property name; appearance fields are found recursively by property name. Integer and boolean properties are converted to the correct binary value type. The JSON format preserves nested and currently unknown properties. Edit the exported JSON without removing the `format`, `header_properties`, or `characters` fields.
 
-`add` randomly selects a Soldier template from the bundled `Templates/New Character.txt` records, based on the supplied character pools. It applies the requested name and always sets the character type and Soldier/VIP/Dark VIP eligibility flags.
+`add` generates a Soldier with a random country and background from the extracted generation data, applies the requested name, and omits appearance data so the game can generate it. Rules are stored in `data/Files/Templates/Character Generation Rules.json`; country and background pools are in `data/Files/Templates/Character Generation Data.json`.
+
+## Character Order
+
+When writing a pool, the utility places characters without a `kAppearance` property at the beginning. XCOM 2 needs these characters first in the pool to generate their appearances randomly; otherwise, their appearance may remain static. This ordering also applies to merged pools. The relative order within the appearance-less and appearance-defined groups is preserved, so the written order may differ from the input order.
 
 Python applications can generate the same randomized soldier directly:
 
@@ -61,9 +65,9 @@ from xcom2_characterpool_py import generate_character
 soldier = generate_character("Jane", "Doe", nickname="Viper")
 ```
 
-Pass `biography` to set the soldier's background text, or leave it blank to keep the selected template's biography. Pass `existing_characters` to avoid reusing their appearances when an unused template is available.
+Pass `biography` or `background_text` to set the soldier's background text; if omitted, a background is randomly selected from the extracted data. Optional `character_template_name`, `soldier_class_template_name`, and `country` arguments are checked against the bundled generation rules. Names and background text longer than XCOM's supported limits are truncated. `existing_characters` remains accepted for compatibility; generated records omit appearances for the game to create.
 
-For batches, use `generate_characters()` with an iterable of request mappings. Each mapping requires `first_name` and `last_name`, and may include `nickname`. Templates and existing appearances are processed once per batch, and generated appearances are avoided until no unused template appearances remain:
+For batches, use `generate_characters()` with an iterable of request mappings. Each mapping requires `first_name` and `last_name`, and may include `nickname`, `character_template_name`, `soldier_class_template_name`, `country`, and `background_text` (or `biography`):
 
 ```python
 from xcom2_characterpool_py import generate_characters
@@ -71,7 +75,12 @@ from xcom2_characterpool_py import generate_characters
 soldiers = generate_characters(
     [
         {"first_name": "Jane", "last_name": "Doe", "nickname": "Viper"},
-        {"first_name": "Alex", "last_name": "Kim"},
+        {
+            "first_name": "Alex",
+            "last_name": "Kim",
+            "character_template_name": "ReaperSoldier",
+            "soldier_class_template_name": "Reaper",
+        },
     ],
     existing_characters=saved_characters,
 )

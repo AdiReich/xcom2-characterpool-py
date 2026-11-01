@@ -14,3 +14,5 @@ dist/
 # Generated character pools and JSON exports
 *.bin
 *.json
+!xcom2_characterpool_py/data/Files/Templates/Character Generation Rules.json
+!xcom2_characterpool_py/data/Files/Templates/Character Generation Data.json
