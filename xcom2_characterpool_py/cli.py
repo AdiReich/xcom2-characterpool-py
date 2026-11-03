@@ -10,8 +10,6 @@ from .format import PoolFormatError, Property
 from .pool import (
     Character,
     Pool,
-    _current_pool_timestamp,
-    _empty_character_appearance,
     generate_character,
     load_json,
     read_pool,
@@ -27,29 +25,6 @@ def _read_asset(path: Path) -> str:
         "utf-16" if path.read_bytes()[:2] in (b"\xff\xfe", b"\xfe\xff") else "utf-8-sig"
     )
     return path.read_text(encoding=encoding)
-
-
-def _character(first_name: str, last_name: str, nickname: str = "") -> Character:
-    return Character(
-        [
-            Property("strFirstName", "StrProperty", first_name),
-            Property("strLastName", "StrProperty", last_name),
-            Property("strNickName", "StrProperty", f"'{nickname}'" if nickname else ""),
-            Property("CharacterTemplateName", "NameProperty", "Soldier"),
-            Property("m_SoldierClassTemplateName", "NameProperty", "Rookie"),
-            Property("Country", "NameProperty", "Country_USA"),
-            Property(
-                "kAppearance",
-                "StructProperty",
-                _empty_character_appearance(),
-            ),
-            Property("AllowedTypeSoldier", "BoolProperty", True),
-            Property("AllowedTypeVIP", "BoolProperty", False),
-            Property("AllowedTypeDarkVIP", "BoolProperty", False),
-            Property("PoolTimestamp", "StrProperty", _current_pool_timestamp()),
-            Property("BackgroundText", "StrProperty", ""),
-        ]
-    )
 
 
 def _get_property(properties: list[Property], key: str) -> Property | None:
@@ -88,6 +63,18 @@ def _set_value(prop: Property, value: str) -> None:
         prop.value = value
     prop.raw_body = None
     prop.original_value = None
+
+
+def _strict_enabled(args: argparse.Namespace) -> bool:
+    return not args.no_strict
+
+
+def _add_strict_option(command: argparse.ArgumentParser) -> None:
+    command.add_argument(
+        "--no-strict",
+        action="store_true",
+        help="Allow unknown properties and values outside the strict vanilla rules",
+    )
 
 
 def _load_templates() -> list[dict[str, str]]:
@@ -140,7 +127,7 @@ def _load_templates() -> list[dict[str, str]]:
 
 def _cmd_inspect(args: argparse.Namespace) -> int:
     for path in args.pools:
-        pool = read_pool(path)
+        pool = read_pool(path, strict=_strict_enabled(args))
         print(
             f"{path}: {len(pool.characters)} characters; pool name: {pool.file_name or '(unnamed)'}"
         )
@@ -150,7 +137,7 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
 
 
 def _cmd_inspect_character(args: argparse.Namespace) -> int:
-    pool = read_pool(args.pool)
+    pool = read_pool(args.pool, strict=_strict_enabled(args))
     if args.index < 0 or args.index >= len(pool.characters):
         raise PoolFormatError(f"Character index out of range: {args.index}.")
     character = pool.characters[args.index]
@@ -169,7 +156,7 @@ def _cmd_inspect_character(args: argparse.Namespace) -> int:
 
 
 def _cmd_merge(args: argparse.Namespace) -> int:
-    pools = [read_pool(path) for path in args.pools]
+    pools = [read_pool(path, strict=_strict_enabled(args)) for path in args.pools]
     result = Pool(list(pools[0].header_properties), [])
     seen: set[tuple[tuple[str, Any], ...]] = set()
     duplicates = 0
@@ -182,7 +169,7 @@ def _cmd_merge(args: argparse.Namespace) -> int:
             seen.add(identity)
             result.characters.append(character)
     result.file_name = f"CharacterPool\\Importable\\{Path(args.output).name}"
-    write_pool(result, args.output)
+    write_pool(result, args.output, strict=_strict_enabled(args))
     print(
         f"Merged {len(pools)} pools: wrote {len(result.characters)} characters to {args.output} ({duplicates} duplicates skipped)."
     )
@@ -194,16 +181,23 @@ def _cmd_new(args: argparse.Namespace) -> int:
     characters = (
         []
         if args.empty
-        else [generate_character(args.first_name, args.last_name, args.nickname)]
+        else [
+            generate_character(
+                args.first_name,
+                args.last_name,
+                args.nickname,
+                strict=_strict_enabled(args),
+            )
+        ]
     )
     pool = Pool([Property("PoolFileName", "StrProperty", name)], characters)
-    write_pool(pool, args.output)
+    write_pool(pool, args.output, strict=_strict_enabled(args))
     print(f"Created pool with {len(characters)} characters: {args.output}")
     return 0
 
 
 def _cmd_export_json(args: argparse.Namespace) -> int:
-    pool = read_pool(args.pool)
+    pool = read_pool(args.pool, strict=_strict_enabled(args))
     if args.output == "-":
         print(json.dumps(pool.to_json(), ensure_ascii=False, indent=2))
     else:
@@ -213,29 +207,30 @@ def _cmd_export_json(args: argparse.Namespace) -> int:
 
 
 def _cmd_import_json(args: argparse.Namespace) -> int:
-    pool = load_json(args.json_file)
+    pool = load_json(args.json_file, strict=_strict_enabled(args))
     pool.file_name = f"CharacterPool\\Importable\\{Path(args.output).name}"
-    write_pool(pool, args.output)
+    write_pool(pool, args.output, strict=_strict_enabled(args))
     print(f"Wrote {len(pool.characters)} characters to {args.output}")
     return 0
 
 
 def _cmd_add(args: argparse.Namespace) -> int:
-    pool = read_pool(args.pool)
+    pool = read_pool(args.pool, strict=_strict_enabled(args))
     character = generate_character(
         args.first_name,
         args.last_name,
         args.nickname,
         existing_characters=pool.characters,
+        strict=_strict_enabled(args),
     )
     pool.characters.append(character)
-    write_pool(pool, args.output)
+    write_pool(pool, args.output, strict=_strict_enabled(args))
     print(f"Added character; pool now contains {len(pool.characters)} characters.")
     return 0
 
 
 def _cmd_delete(args: argparse.Namespace) -> int:
-    pool = read_pool(args.pool)
+    pool = read_pool(args.pool, strict=_strict_enabled(args))
     indexes = set(args.index)
     invalid = sorted(
         index for index in indexes if index < 0 or index >= len(pool.characters)
@@ -249,7 +244,7 @@ def _cmd_delete(args: argparse.Namespace) -> int:
         for index, character in enumerate(pool.characters)
         if index not in indexes
     ]
-    write_pool(pool, args.output)
+    write_pool(pool, args.output, strict=_strict_enabled(args))
     print(
         f"Deleted {len(indexes)} characters; pool now contains {len(pool.characters)}."
     )
@@ -257,7 +252,7 @@ def _cmd_delete(args: argparse.Namespace) -> int:
 
 
 def _cmd_set(args: argparse.Namespace) -> int:
-    pool = read_pool(args.pool)
+    pool = read_pool(args.pool, strict=_strict_enabled(args))
     if args.index < 0 or args.index >= len(pool.characters):
         raise PoolFormatError(f"Character index out of range: {args.index}.")
     character = pool.characters[args.index]
@@ -271,7 +266,7 @@ def _cmd_set(args: argparse.Namespace) -> int:
         if prop is None:
             raise PoolFormatError(f"Character property not found: {key}.")
         _set_value(prop, value)
-    write_pool(pool, args.output)
+    write_pool(pool, args.output, strict=_strict_enabled(args))
     print(f"Updated character {args.index}: {character.full_name}")
     return 0
 
@@ -314,6 +309,7 @@ def build_parser() -> argparse.ArgumentParser:
         "inspect", help="List characters in one or more .bin pools"
     )
     inspect.add_argument("pools", nargs="+", help="Input pool files")
+    _add_strict_option(inspect)
     inspect.set_defaults(handler=_cmd_inspect)
 
     inspect_character = commands.add_parser(
@@ -323,6 +319,7 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_character.add_argument(
         "--index", type=int, required=True, help="Zero-based character index"
     )
+    _add_strict_option(inspect_character)
     inspect_character.set_defaults(handler=_cmd_inspect_character)
 
     merge = commands.add_parser(
@@ -330,6 +327,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     merge.add_argument("pools", nargs="+", help="Input pool files")
     merge.add_argument("-o", "--output", required=True, help="Output .bin path")
+    _add_strict_option(merge)
     merge.set_defaults(handler=_cmd_merge)
 
     new = commands.add_parser(
@@ -340,6 +338,7 @@ def build_parser() -> argparse.ArgumentParser:
     new.add_argument("--last-name", default="Character")
     new.add_argument("--nickname", default="")
     new.add_argument("--empty", action="store_true", help="Create an empty pool")
+    _add_strict_option(new)
     new.set_defaults(handler=_cmd_new)
 
     export = commands.add_parser("export-json", help="Export a pool to editable JSON")
@@ -347,6 +346,7 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument(
         "-o", "--output", default="-", help="JSON file, or - for stdout"
     )
+    _add_strict_option(export)
     export.set_defaults(handler=_cmd_export_json)
 
     imp = commands.add_parser(
@@ -354,6 +354,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     imp.add_argument("json_file")
     imp.add_argument("-o", "--output", required=True)
+    _add_strict_option(imp)
     imp.set_defaults(handler=_cmd_import_json)
 
     add = commands.add_parser("add", help="Append a randomized soldier to a pool")
@@ -362,12 +363,14 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--first-name", required=True)
     add.add_argument("--last-name", required=True)
     add.add_argument("--nickname", default="")
+    _add_strict_option(add)
     add.set_defaults(handler=_cmd_add)
 
     delete = commands.add_parser("delete", help="Remove characters by zero-based index")
     delete.add_argument("pool")
     delete.add_argument("-o", "--output", required=True)
     delete.add_argument("--index", type=int, action="append", required=True)
+    _add_strict_option(delete)
     delete.set_defaults(handler=_cmd_delete)
 
     set_cmd = commands.add_parser("set", help="Set one or more character properties")
@@ -376,6 +379,7 @@ def build_parser() -> argparse.ArgumentParser:
     set_cmd.add_argument(
         "--index", type=int, required=True, help="Zero-based character index"
     )
+    _add_strict_option(set_cmd)
     set_cmd.add_argument(
         "--property",
         action="append",

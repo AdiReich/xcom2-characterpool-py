@@ -51,6 +51,15 @@ python -m xcom2_characterpool_py templates --search Kevlar --part-type Torso
 
 `set` accepts any character property name; appearance fields are found recursively by property name. Integer and boolean properties are converted to the correct binary value type. The JSON format preserves nested and currently unknown properties. Edit the exported JSON without removing the `format`, `header_properties`, or `characters` fields.
 
+Binary pools and JSON imports larger than 64 MiB are rejected. Strict mode is enabled by default for pool reads, writes, JSON imports, and character generation. Binary and JSON data use the same validation rules, configured in `xcom2_characterpool_py/data/Files/Templates/Character Pool Strict Rules.json`. The allowlist is based on properties observed in the local WotC Importable pools. Strict mode limits struct nesting to 2 levels, `IntProperty` values to -1 through 200, and string properties to the following rules:
+
+- Most `StrProperty` and `NameProperty` values are limited to 50 characters and ASCII letters, digits, or underscores.
+- First name, last name, nickname, and timestamp values may contain printable characters and are limited to 50 characters.
+- `BackgroundText` may contain printable characters and line breaks and is limited to 2,000 characters.
+- `PoolFileName` is limited to 100 characters and must be a relative path or filename ending in `.bin`, or the exact placeholder `Unsaved Pool`.
+
+Strict mode also checks property types, boolean values and encodings, struct layouts, and property names. Existing pools with mod-specific properties or values outside these rules may fail strict validation. Pass `--no-strict` to a pool command, or `strict=False` to the Python read/write/generation APIs, to use permissive behavior.
+
 `add` generates a Soldier with a random country and background from the extracted generation data, applies the requested name, and omits appearance data so the game can generate it. Rules are stored in `data/Files/Templates/Character Generation Rules.json`; country and background pools are in `data/Files/Templates/Character Generation Data.json`.
 
 ## Character Order

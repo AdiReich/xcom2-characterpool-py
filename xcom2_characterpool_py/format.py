@@ -5,6 +5,8 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
+_MAX_PROPERTY_NESTING = 5
+
 
 class PoolFormatError(ValueError):
     """Raised when a character-pool binary cannot be parsed safely."""
@@ -24,7 +26,10 @@ def _write_i32(value: int) -> bytes:
 
 
 def _decode_string(data: bytes) -> str:
-    return data.replace(b"\0", b"").decode("cp1252").replace("\r", "\n")
+    try:
+        return data.replace(b"\0", b"").decode("cp1252").replace("\r", "\n")
+    except UnicodeDecodeError as exc:
+        raise PoolFormatError("Invalid encoded property string.") from exc
 
 
 def _encode_string(value: str | None) -> bytes:
@@ -63,7 +68,11 @@ class Property:
     name_number: int = 0
 
     @classmethod
-    def read(cls, data: bytes, offset: int) -> tuple[Property | None, int]:
+    def read(
+        cls, data: bytes, offset: int, _depth: int = 0
+    ) -> tuple[Property | None, int]:
+        if _depth > _MAX_PROPERTY_NESTING:
+            raise PoolFormatError("Property nesting exceeds the supported limit.")
         name_length, offset = _read_i32(data, offset)
         if name_length < 1 or name_length > len(data) - offset:
             raise PoolFormatError("Invalid property name length.")
@@ -111,12 +120,17 @@ class Property:
                 if string_byte_length > len(raw_body) - 4:
                     raise PoolFormatError(f"Invalid string length for {name!r}.")
                 string_data_length = string_byte_length
-                value = (
-                    raw_body[4 : 4 + string_byte_length]
-                    .decode("utf-16-le")
-                    .rstrip("\0")
-                    .replace("\r", "\n")
-                )
+                try:
+                    value = (
+                        raw_body[4 : 4 + string_byte_length]
+                        .decode("utf-16-le")
+                        .rstrip("\0")
+                        .replace("\r", "\n")
+                    )
+                except UnicodeDecodeError as exc:
+                    raise PoolFormatError(
+                        f"Invalid UTF-16 string data for {name!r}."
+                    ) from exc
             elif string_length > len(raw_body) - 4:
                 raise PoolFormatError(f"Invalid string length for {name!r}.")
             else:
@@ -147,7 +161,7 @@ class Property:
             offset += tag_length + 4
             children: list[Property] = []
             while True:
-                child, offset = cls.read(data, offset)
+                child, offset = cls.read(data, offset, _depth + 1)
                 if child is None:
                     break
                 children.append(child)
@@ -257,7 +271,7 @@ class Property:
         return result
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> Property:
+    def from_dict(cls, value: dict[str, Any], _depth: int = 0) -> Property:
         if (
             not isinstance(value, dict)
             or not isinstance(value.get("name"), str)
@@ -268,11 +282,13 @@ class Property:
             )
         prop_value = value.get("value")
         if value["type"] == "StructProperty":
+            if _depth >= _MAX_PROPERTY_NESTING:
+                raise PoolFormatError("Property nesting exceeds the supported limit.")
             if not isinstance(prop_value, list):
                 raise PoolFormatError(
                     f"Struct property {value['name']!r} must contain a property list."
                 )
-            prop_value = [cls.from_dict(item) for item in prop_value]
+            prop_value = [cls.from_dict(item, _depth + 1) for item in prop_value]
         try:
             raw_body_hex = value.get("raw_body")
             raw_body = None

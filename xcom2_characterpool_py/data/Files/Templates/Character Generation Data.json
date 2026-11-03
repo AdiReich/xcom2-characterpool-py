@@ -1,43 +1,57 @@
 {
+  "countries_by_template": {
+    "Soldier": {
+      "Country_Argentina": "Argentina",
+      "Country_Australia": "Australia",
+      "Country_Belgium": "Belgium",
+      "Country_Brazil": "Brazil",
+      "Country_Canada": "Canada",
+      "Country_China": "China",
+      "Country_Columbia": "Colombia",
+      "Country_Egypt": "Egypt",
+      "Country_France": "France",
+      "Country_Germany": "Germany",
+      "Country_Greece": "Greece",
+      "Country_India": "India",
+      "Country_Indonesia": "Indonesia",
+      "Country_Iran": "Iran",
+      "Country_Ireland": "Ireland",
+      "Country_Israel": "Israel",
+      "Country_Italy": "Italy",
+      "Country_Japan": "Japan",
+      "Country_Mexico": "Mexico",
+      "Country_Netherlands": "Netherlands",
+      "Country_Nigeria": "Nigeria",
+      "Country_Norway": "Norway",
+      "Country_Pakistan": "Pakistan",
+      "Country_Poland": "Poland",
+      "Country_Portugal": "Portugal",
+      "Country_Russia": "Russia",
+      "Country_Scotland": "Scotland",
+      "Country_SouthAfrica": "South Africa",
+      "Country_SouthKorea": "South Korea",
+      "Country_Spain": "Spain",
+      "Country_Sweden": "Sweden",
+      "Country_Turkey": "Turkey",
+      "Country_Ukraine": "Ukraine",
+      "Country_UK": "United Kingdom",
+      "Country_USA": "United States",
+      "Country_Venezuela": "Venezuela"
+    },
+    "SkirmisherSoldier": {
+      "Country_Skirmisher": "Skirmisher"
+    },
+    "ReaperSoldier": {
+      "Country_Reaper": "Reaper"
+    },
+    "TemplarSoldier": {
+      "Country_Templar": "Templar"
+    },
+    "SparkSoldier": {
+      "Country_Spark": "Spark"
+    }
+  },
   "Soldier": {
-    "countries": [
-      "Country_Argentina",
-      "Country_Australia",
-      "Country_Belgium",
-      "Country_Brazil",
-      "Country_Canada",
-      "Country_China",
-      "Country_Columbia",
-      "Country_Egypt",
-      "Country_France",
-      "Country_Germany",
-      "Country_Greece",
-      "Country_India",
-      "Country_Indonesia",
-      "Country_Iran",
-      "Country_Ireland",
-      "Country_Israel",
-      "Country_Italy",
-      "Country_Japan",
-      "Country_Mexico",
-      "Country_Netherlands",
-      "Country_Nigeria",
-      "Country_Norway",
-      "Country_Pakistan",
-      "Country_Poland",
-      "Country_Portugal",
-      "Country_Russia",
-      "Country_Scotland",
-      "Country_SouthAfrica",
-      "Country_SouthKorea",
-      "Country_Spain",
-      "Country_Sweden",
-      "Country_Turkey",
-      "Country_Ukraine",
-      "Country_UK",
-      "Country_USA",
-      "Country_Venezuela"
-    ],
     "background_texts": [
       "Before the invasion, they lived an ordinary life, until ADVENT took everything from them. Their family disappeared during a mass roundup, leaving them with nothing but anger and a desperate need to survive.\n\nFor years, they fought the occupation from the shadows, sabotaging supply lines and ambushing patrols. They never stayed in one place long and trusted nobody easily. When an operation went wrong and their resistance cell was wiped out, they refused to abandon a wounded comrade, fighting until an XCOM extraction team arrived.\n\nImpressed by their determination, XCOM offered them a place among its ranks. Now they fight not for glory or revenge, but for a future where nobody has to endure what they did. The aliens took their past. They won't let them take humanity's future.",
       "Once a medic in an overcrowded refugee camp, they spent years trying to save lives while ADVENT's occupation made survival increasingly impossible. When soldiers stormed the camp and began executing suspected resistance sympathizers, they took up a weapon for the first time. They escaped with a handful of survivors, but the experience changed them forever. Now serving with XCOM, they carry medical supplies beside their rifle, determined to ensure that no one under their protection is left behind again.",
@@ -246,26 +260,6 @@
       "The radio station kept broadcasting after its staff vanished. A former vinyl record cutter broke in to investigate and found the transmitter running on a loop of emergency calls from future dates. One recording described an ADVENT raid that had not yet happened. They warned the targeted settlement, saving dozens, but the prediction came true elsewhere that same night. Convinced the signal was part of an alien forecasting system, they joined XCOM carrying the original recordings—and a growing fear of what the next message might reveal.",
       "A city’s stray cats began gathering outside a condemned apartment block, refusing to leave even when ADVENT patrols approached. A former veterinary anesthetist followed them inside and discovered a hidden shelter where fugitives were being kept for illegal neural experiments. They used stolen sedatives to incapacitate the guards and guide the prisoners out through a laundry chute. Though the escape succeeded, the shelter was destroyed before investigators arrived. The anesthetist joined XCOM with a steady hand, a cool head, and no patience for anyone who treats living beings as disposable material.",
       "During a routine rehearsal, the orchestra’s timpanist felt a second heartbeat vibrating beneath the stage. A former structural acoustician, they traced it to an ADVENT resonance device buried under the concert hall, pulsing signals that made nearby civilians unusually compliant. They sabotaged it during the opening performance, plunging the building into chaos and allowing the audience to escape. The device’s core survived, and the resistance smuggled it to XCOM for study. Now they help identify alien signals that hide beneath sounds everyone else ignores."
-    ]
-  },
-  "SkirmisherSoldier": {
-    "countries": [
-      "Country_Skirmisher"
-    ]
-  },
-  "ReaperSoldier": {
-    "countries": [
-      "Country_Reaper"
-    ]
-  },
-  "TemplarSoldier": {
-    "countries": [
-      "Country_Templar"
-    ]
-  },
-  "SparkSoldier": {
-    "countries": [
-      "Country_Spark"
     ]
   }
 }

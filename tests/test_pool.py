@@ -8,22 +8,50 @@ from pathlib import Path
 from unittest.mock import patch
 
 from xcom2_characterpool_py import generate_character, generate_characters
-from xcom2_characterpool_py.cli import _character, main
-from xcom2_characterpool_py.format import Property
-from xcom2_characterpool_py.pool import Character, Pool, read_pool
+from xcom2_characterpool_py.cli import main
+from xcom2_characterpool_py.format import PoolFormatError, Property
+from xcom2_characterpool_py.pool import Character, Pool, load_json, read_pool
 
 
 def _generation_data() -> dict[str, dict[str, list[str]]]:
     return {
+        "countries_by_template": {
+            "Soldier": {
+                "Country_USA": "United States",
+                "Country_Poland": "Poland",
+            },
+            "SkirmisherSoldier": {"Country_Skirmisher": "Skirmisher"},
+            "ReaperSoldier": {"Country_Reaper": "Reaper"},
+            "TemplarSoldier": {"Country_Templar": "Templar"},
+            "SparkSoldier": {"Country_Spark": "Spark"},
+        },
         "Soldier": {
-            "countries": ["Country_USA", "Country_Poland"],
             "background_texts": ["Template biography", "Available biography"],
         },
-        "SkirmisherSoldier": {"countries": ["Country_Skirmisher"]},
-        "ReaperSoldier": {"countries": ["Country_Reaper"]},
-        "TemplarSoldier": {"countries": ["Country_Templar"]},
-        "SparkSoldier": {"countries": ["Country_Spark"]},
     }
+
+
+def _character(first_name: str, last_name: str, nickname: str = "") -> Character:
+    return Character(
+        [
+            Property("strFirstName", "StrProperty", first_name),
+            Property("strLastName", "StrProperty", last_name),
+            Property("strNickName", "StrProperty", f"'{nickname}'" if nickname else ""),
+            Property("CharacterTemplateName", "NameProperty", "Soldier"),
+            Property("m_SoldierClassTemplateName", "NameProperty", "Rookie"),
+            Property("Country", "NameProperty", "Country_USA"),
+            Property(
+                "kAppearance",
+                "StructProperty",
+                [Property("nmHaircut", "NameProperty", "")],
+            ),
+            Property("AllowedTypeSoldier", "BoolProperty", True),
+            Property("AllowedTypeVIP", "BoolProperty", False),
+            Property("AllowedTypeDarkVIP", "BoolProperty", False),
+            Property("PoolTimestamp", "StrProperty", "20200101_000000"),
+            Property("BackgroundText", "StrProperty", ""),
+        ]
+    )
 
 
 class PoolTests(unittest.TestCase):
@@ -45,6 +73,246 @@ class PoolTests(unittest.TestCase):
         pool = self.make_pool()
 
         self.assertEqual(read_pool(pool.to_bytes()).to_bytes(), pool.to_bytes())
+
+    def test_read_pool_rejects_input_over_size_limit(self) -> None:
+        with (
+            patch("xcom2_characterpool_py.pool._MAX_POOL_INPUT_BYTES", 4),
+            self.assertRaisesRegex(PoolFormatError, "64 MiB size limit"),
+        ):
+            read_pool(b"12345")
+
+    def test_load_json_rejects_input_over_size_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "oversized.json"
+            path.write_bytes(b"12345")
+            with (
+                patch("xcom2_characterpool_py.pool._MAX_POOL_INPUT_BYTES", 4),
+                self.assertRaisesRegex(PoolFormatError, "64 MiB size limit"),
+            ):
+                load_json(path)
+
+    def test_strict_read_rejects_unknown_property_and_permissive_read_accepts_it(
+        self,
+    ) -> None:
+        pool = Pool([], [Character([Property("ModdedField", "IntProperty", 7)])])
+        data = pool.to_bytes(strict=False)
+
+        with self.assertRaisesRegex(PoolFormatError, "Unknown property 'ModdedField'"):
+            read_pool(data)
+
+        restored = read_pool(data, strict=False)
+        self.assertEqual(restored.characters[0].get("ModdedField"), 7)
+
+    def test_strict_json_import_rejects_unknown_property(self) -> None:
+        pool = Pool([], [Character([Property("ModdedField", "IntProperty", 7)])])
+        document = pool.to_json()
+
+        with self.assertRaisesRegex(PoolFormatError, "Unknown property 'ModdedField'"):
+            Pool.from_json(document)
+
+        restored = Pool.from_json(document, strict=False)
+        self.assertEqual(restored.characters[0].get("ModdedField"), 7)
+
+    def test_cli_no_strict_allows_unknown_properties(self) -> None:
+        pool = Pool([], [Character([Property("ModdedField", "IntProperty", 7)])])
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "modded.bin"
+            source.write_bytes(pool.to_bytes(strict=False))
+
+            with redirect_stderr(StringIO()):
+                self.assertEqual(main(["inspect", str(source)]), 2)
+            with redirect_stdout(StringIO()):
+                self.assertEqual(main(["inspect", str(source), "--no-strict"]), 0)
+
+    def test_strict_serialization_requires_exact_integer_and_boolean_types(
+        self,
+    ) -> None:
+        integer_pool = Pool([], [Character([Property("iRace", "IntProperty", True)])])
+        boolean_pool = Pool(
+            [], [Character([Property("AllowedTypeVIP", "BoolProperty", 1)])]
+        )
+
+        with self.assertRaisesRegex(PoolFormatError, "must have an integer value"):
+            integer_pool.to_bytes()
+        with self.assertRaisesRegex(PoolFormatError, "must be true or false"):
+            boolean_pool.to_bytes()
+
+        for value in (-1, 0, 200):
+            Pool([], [Character([Property("iRace", "IntProperty", value)])]).to_bytes()
+        for value in (-2, 201):
+            with self.subTest(value=value):
+                pool = Pool([], [Character([Property("iRace", "IntProperty", value)])])
+                with self.assertRaisesRegex(PoolFormatError, "between -1 and 200"):
+                    pool.to_bytes()
+
+        Pool([], [Character([]) for _ in range(101)]).to_bytes()
+
+    def test_strict_binary_read_rejects_noncanonical_boolean_byte(self) -> None:
+        character = Character(
+            [Property("AllowedTypeVIP", "BoolProperty", True, b"\2", True)]
+        )
+        data = Pool([], [character]).to_bytes(strict=False)
+
+        with self.assertRaisesRegex(PoolFormatError, "invalid boolean encoding"):
+            read_pool(data)
+
+    def test_strict_pool_file_name_requires_bin_filename(self) -> None:
+        for value in (
+            "fixture.bin",
+            "CharacterPool\\Importable\\15 soldiers.bin",
+            "Unsaved Pool",
+        ):
+            with self.subTest(value=value):
+                Pool([Property("PoolFileName", "StrProperty", value)], []).to_bytes()
+
+        for value in (
+            "CharacterPool\\Importable\\soldier.txt",
+            "CharacterPool\\..\\soldier.bin",
+            "CharacterPool\\Importable\\bad:name.bin",
+        ):
+            with self.subTest(value=value):
+                pool = Pool([Property("PoolFileName", "StrProperty", value)], [])
+                with self.assertRaisesRegex(
+                    PoolFormatError, "relative path or filename"
+                ):
+                    pool.to_bytes()
+
+        default_pool = read_pool(Pool([], []).to_bytes())
+        self.assertEqual(
+            default_pool.file_name, "CharacterPool\\Importable\\Unsaved Pool.bin"
+        )
+
+    def test_strict_strings_allow_names_and_background_but_reject_other_punctuation(
+        self,
+    ) -> None:
+        allowed = Pool(
+            [],
+            [
+                Character(
+                    [
+                        Property("strFirstName", "StrProperty", "Ana María"),
+                        Property(
+                            "BackgroundText",
+                            "StrProperty",
+                            "Text,\nwith punctuation! " * 5,
+                        ),
+                        Property(
+                            "PoolTimestamp",
+                            "StrProperty",
+                            "October 21, 2026 - 2:50 PM",
+                        ),
+                    ]
+                )
+            ],
+        )
+        allowed.to_bytes()
+
+        invalid = Pool(
+            [], [Character([Property("Country", "NameProperty", "United-States")])]
+        )
+        with self.assertRaisesRegex(PoolFormatError, r"outside \[A-Za-z0-9_\]"):
+            invalid.to_bytes()
+
+        invalid_text = Pool(
+            [],
+            [Character([Property("PoolTimestamp", "StrProperty", "Oct 21, 2026\x00")])],
+        )
+        with self.assertRaisesRegex(PoolFormatError, "printable characters"):
+            invalid_text.to_bytes()
+
+        for prop in (
+            Property("strFirstName", "StrProperty", "A" * 51),
+            Property("nmBeard", "NameProperty", "A" * 51),
+        ):
+            with self.subTest(property_name=prop.name):
+                with self.assertRaisesRegex(PoolFormatError, "50 characters"):
+                    Pool([], [Character([prop])]).to_bytes()
+
+        valid_long_path = "CharacterPool\\Importable\\" + "A" * 71 + ".bin"
+        Pool([Property("PoolFileName", "StrProperty", valid_long_path)], []).to_bytes()
+
+        invalid_long_path = "CharacterPool\\Importable\\" + "A" * 72 + ".bin"
+        with self.assertRaisesRegex(PoolFormatError, "100 characters"):
+            Pool(
+                [Property("PoolFileName", "StrProperty", invalid_long_path)], []
+            ).to_bytes()
+
+    def test_strict_background_text_has_2000_character_limit(self) -> None:
+        at_limit = Pool(
+            [], [Character([Property("BackgroundText", "StrProperty", "A" * 2000)])]
+        )
+        at_limit.to_bytes()
+
+        over_limit = Pool(
+            [], [Character([Property("BackgroundText", "StrProperty", "A" * 2001)])]
+        )
+        with self.assertRaisesRegex(PoolFormatError, "2000 characters"):
+            over_limit.to_bytes()
+
+    def test_strict_mode_allows_two_struct_levels_only(self) -> None:
+        appearance = Property(
+            "kAppearance",
+            "StructProperty",
+            [Property("bGhostPawn", "BoolProperty", False)],
+        )
+        helper = Property(
+            "CharacterPoolSerializeHelper",
+            "StructProperty",
+            [appearance],
+            struct_tag="CharacterPoolDataElement",
+        )
+        Pool([helper], []).to_bytes()
+
+        appearance.value.append(
+            Property(
+                "kAppearance",
+                "StructProperty",
+                [Property("bGhostPawn", "BoolProperty", False)],
+            )
+        )
+        with self.assertRaisesRegex(PoolFormatError, "strict limit of 2 levels"):
+            Pool([helper], []).to_bytes()
+
+    def test_property_parser_rejects_invalid_encoded_name(self) -> None:
+        malformed = struct.pack("<i", 2) + b"\x81\0" + bytes(4)
+
+        with self.assertRaisesRegex(PoolFormatError, "Invalid encoded property string"):
+            Property.read(malformed, 0)
+
+    def test_json_property_parser_rejects_excessive_nesting(self) -> None:
+        nested_property = {"name": "leaf", "type": "StrProperty", "value": ""}
+        for _ in range(5):
+            nested_property = {
+                "name": "nested",
+                "type": "StructProperty",
+                "value": [nested_property],
+            }
+        Property.from_dict(nested_property)
+
+        for _ in range(6):
+            nested_property = {
+                "name": "nested",
+                "type": "StructProperty",
+                "value": [nested_property],
+            }
+
+        with self.assertRaisesRegex(PoolFormatError, "nesting exceeds"):
+            Property.from_dict(nested_property)
+
+    def test_binary_property_parser_rejects_excessive_nesting(self) -> None:
+        nested_property = Property("leaf", "StrProperty", "")
+        for _ in range(5):
+            nested_property = Property("nested", "StructProperty", [nested_property])
+        serialized = nested_property.to_bytes()
+        parsed, offset = Property.read(serialized, 0)
+        self.assertEqual(offset, len(serialized))
+        self.assertIsNotNone(parsed)
+
+        for _ in range(6):
+            nested_property = Property("nested", "StructProperty", [nested_property])
+
+        with self.assertRaisesRegex(PoolFormatError, "nesting exceeds"):
+            Property.read(nested_property.to_bytes(), 0)
 
     def test_characters_without_appearance_are_serialized_first(self) -> None:
         appearance_character = _character("Ada", "Test")
@@ -74,9 +342,9 @@ class PoolTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "fixture.bin"
-            path.write_bytes(pool.to_bytes())
-            restored = read_pool(path)
-            self.assertEqual(restored.to_bytes(), path.read_bytes())
+            path.write_bytes(pool.to_bytes(strict=False))
+            restored = read_pool(path, strict=False)
+            self.assertEqual(restored.to_bytes(strict=False), path.read_bytes())
 
         self.assertEqual(
             [prop.name for prop in restored.header_properties], expected_names
@@ -98,11 +366,13 @@ class PoolTests(unittest.TestCase):
         )
         pool = Pool([], [Character([appearance])])
 
-        restored = Pool.from_json(pool.to_json())
+        restored = Pool.from_json(pool.to_json(), strict=False)
 
-        self.assertEqual(restored.to_bytes(), pool.to_bytes())
+        self.assertEqual(restored.to_bytes(strict=False), pool.to_bytes(strict=False))
         restored.characters[0].properties[0].value[0].value = False
-        self.assertNotEqual(restored.to_bytes(), pool.to_bytes())
+        self.assertNotEqual(
+            restored.to_bytes(strict=False), pool.to_bytes(strict=False)
+        )
 
     def test_empty_raw_data_is_regenerated_from_property_values(self) -> None:
         pool = Pool(
@@ -293,8 +563,10 @@ class PoolTests(unittest.TestCase):
         self.assertEqual(restored.struct_tag, "CharacterPoolDataElement")
         self.assertEqual(restored.struct_layout, "tag-first")
         pool = Pool([], [Character([restored])])
-        json_restored = Pool.from_json(pool.to_json())
-        self.assertEqual(json_restored.to_bytes(), pool.to_bytes())
+        json_restored = Pool.from_json(pool.to_json(), strict=False)
+        self.assertEqual(
+            json_restored.to_bytes(strict=False), pool.to_bytes(strict=False)
+        )
 
         restored.value[0].value = "Grace"
         rewritten = restored.to_bytes()
@@ -458,7 +730,13 @@ class PoolTests(unittest.TestCase):
             self.assertTrue(added.get("AllowedTypeVIP"))
             self.assertTrue(added.get("AllowedTypeDarkVIP"))
             self.assertEqual(added.get("Country"), "Country_USA")
-            self.assertEqual(added.get("BackgroundText"), "Template biography")
+            background_text = added.get("BackgroundText")
+            self.assertTrue(
+                background_text.startswith(
+                    "Country of Origin: United States\nDate of Birth: "
+                )
+            )
+            self.assertTrue(background_text.endswith("\n\nTemplate biography"))
             self.assertIsNone(added.get("kAppearance"))
             for name in (
                 "AllowedTypeSoldier",
@@ -489,7 +767,11 @@ class PoolTests(unittest.TestCase):
             / "Templates"
             / "Character Generation Data.json"
         )
-        soldier_data = json.loads(data_path.read_text(encoding="utf-8"))["Soldier"]
+        generation_data = json.loads(data_path.read_text(encoding="utf-8"))
+        soldier_data = generation_data["Soldier"]
+        country_label = generation_data["countries_by_template"]["Soldier"][
+            generated.get("Country")
+        ]
         self.assertEqual(generated.get("strFirstName"), "Alex")
         self.assertEqual(generated.get("strLastName"), "Kim")
         self.assertEqual(generated.get("strNickName"), "'Viper'")
@@ -499,12 +781,85 @@ class PoolTests(unittest.TestCase):
             generated.get("m_SoldierClassTemplateName"),
             {"Ranger", "Sharpshooter", "Grenadier", "Specialist", "PsiOperative"},
         )
-        self.assertIn(generated.get("Country"), soldier_data["countries"])
+        self.assertIn(
+            generated.get("Country"),
+            generation_data["countries_by_template"]["Soldier"],
+        )
         self.assertTrue(generated.get("AllowedTypeSoldier"))
         self.assertTrue(generated.get("AllowedTypeVIP"))
         self.assertTrue(generated.get("AllowedTypeDarkVIP"))
-        self.assertIn(generated.get("BackgroundText"), soldier_data["background_texts"])
+        background_text = generated.get("BackgroundText")
+        self.assertTrue(
+            background_text.startswith(
+                f"Country of Origin: {country_label}\nDate of Birth: "
+            )
+        )
+        self.assertTrue(
+            any(
+                background_text.endswith(template)
+                for template in soldier_data["background_texts"]
+            )
+        )
         self.assertIsNone(generated.get("kAppearance"))
+
+    def test_generated_background_headers_follow_character_type(self) -> None:
+        cases = (
+            (
+                "Soldier",
+                "Ranger",
+                "Country_USA",
+                "Country of Origin: United States\n"
+                "Date of Birth: December 31, 2010\n\nTemplate biography",
+            ),
+            (
+                "ReaperSoldier",
+                "Reaper",
+                "Country_Reaper",
+                "Date of Birth: December 31, 2005\n\nTemplate biography",
+            ),
+            (
+                "SkirmisherSoldier",
+                "Skirmisher",
+                "Country_Skirmisher",
+                "Date of Birth: December 31, 2034\n\nTemplate biography",
+            ),
+            (
+                "TemplarSoldier",
+                "Templar",
+                "Country_Templar",
+                "Date of Birth: December 31, 2010\n\nTemplate biography",
+            ),
+            (
+                "SparkSoldier",
+                "Spark",
+                "Country_Spark",
+                "Template biography",
+            ),
+        )
+        with (
+            patch(
+                "xcom2_characterpool_py.pool._load_character_generation_data",
+                return_value=_generation_data(),
+            ),
+            patch(
+                "xcom2_characterpool_py.pool.random.choice",
+                side_effect=lambda values: values[0],
+            ),
+            patch(
+                "xcom2_characterpool_py.pool.random.randrange",
+                side_effect=lambda stop: stop - 1,
+            ),
+        ):
+            for template_name, soldier_class, country, expected in cases:
+                with self.subTest(template_name=template_name):
+                    generated = generate_character(
+                        "Alex",
+                        "Kim",
+                        character_template_name=template_name,
+                        soldier_class_template_name=soldier_class,
+                        country=country,
+                    )
+                    self.assertEqual(generated.get("BackgroundText"), expected)
 
     def test_generate_character_overrides_biography_and_omits_appearance(
         self,

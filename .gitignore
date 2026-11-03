@@ -16,3 +16,4 @@ dist/
 *.json
 !xcom2_characterpool_py/data/Files/Templates/Character Generation Rules.json
 !xcom2_characterpool_py/data/Files/Templates/Character Generation Data.json
+!xcom2_characterpool_py/data/Files/Templates/Character Pool Strict Rules.json
