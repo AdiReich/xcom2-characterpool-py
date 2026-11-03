@@ -802,44 +802,84 @@ class PoolTests(unittest.TestCase):
         )
         self.assertIsNone(generated.get("kAppearance"))
 
+    def test_generate_skirmisher_uses_template_background_data(self) -> None:
+        data_path = (
+            Path(__file__).resolve().parents[1]
+            / "xcom2_characterpool_py"
+            / "data"
+            / "Files"
+            / "Templates"
+            / "Character Generation Data.json"
+        )
+        generation_data = json.loads(data_path.read_text(encoding="utf-8"))
+        backgrounds = generation_data["SkirmisherSoldier"]["background_texts"]
+
+        with patch(
+            "xcom2_characterpool_py.pool.random.choice",
+            side_effect=lambda items: items[0],
+        ):
+            generated = generate_character(
+                "Alex",
+                "Kim",
+                character_template_name="SkirmisherSoldier",
+                soldier_class_template_name="Skirmisher",
+                country="Country_Skirmisher",
+            )
+
+        self.assertEqual(len(backgrounds), 200)
+        self.assertTrue(
+            any(
+                generated.get("BackgroundText", "").endswith(text)
+                for text in backgrounds
+            )
+        )
+
     def test_generated_background_headers_follow_character_type(self) -> None:
+        data_path = (
+            Path(__file__).resolve().parents[1]
+            / "xcom2_characterpool_py"
+            / "data"
+            / "Files"
+            / "Templates"
+            / "Character Generation Data.json"
+        )
+        generation_data = json.loads(data_path.read_text(encoding="utf-8"))
         cases = (
             (
                 "Soldier",
                 "Ranger",
                 "Country_USA",
-                "Country of Origin: United States\n"
-                "Date of Birth: December 31, 2010\n\nTemplate biography",
+                "Country of Origin: United States\nDate of Birth: December 31, 2010",
             ),
             (
                 "ReaperSoldier",
                 "Reaper",
                 "Country_Reaper",
-                "Date of Birth: December 31, 2005\n\nTemplate biography",
+                "Date of Birth: December 31, 2005",
             ),
             (
                 "SkirmisherSoldier",
                 "Skirmisher",
                 "Country_Skirmisher",
-                "Date of Birth: December 31, 2034\n\nTemplate biography",
+                "Date of Birth: December 31, 2034",
             ),
             (
                 "TemplarSoldier",
                 "Templar",
                 "Country_Templar",
-                "Date of Birth: December 31, 2010\n\nTemplate biography",
+                "Date of Birth: December 31, 2010",
             ),
             (
                 "SparkSoldier",
                 "Spark",
                 "Country_Spark",
-                "Template biography",
+                "",
             ),
         )
         with (
             patch(
                 "xcom2_characterpool_py.pool._load_character_generation_data",
-                return_value=_generation_data(),
+                return_value=generation_data,
             ),
             patch(
                 "xcom2_characterpool_py.pool.random.choice",
@@ -850,7 +890,7 @@ class PoolTests(unittest.TestCase):
                 side_effect=lambda stop: stop - 1,
             ),
         ):
-            for template_name, soldier_class, country, expected in cases:
+            for template_name, soldier_class, country, expected_header in cases:
                 with self.subTest(template_name=template_name):
                     generated = generate_character(
                         "Alex",
@@ -859,6 +899,12 @@ class PoolTests(unittest.TestCase):
                         soldier_class_template_name=soldier_class,
                         country=country,
                     )
+                    background = generation_data[template_name]["background_texts"][0]
+                    expected = (
+                        f"{expected_header}\n\n{background}"
+                        if expected_header
+                        else background
+                    )[:2000]
                     self.assertEqual(generated.get("BackgroundText"), expected)
 
     def test_generate_character_overrides_biography_and_omits_appearance(

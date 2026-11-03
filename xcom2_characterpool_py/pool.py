@@ -593,33 +593,34 @@ def _generate_character(
     last_name = last_name[: limits["strLastName"]]
     nickname = nickname[: limits["strNickName"]]
     if not background_text:
-        backgrounds = template_data.get("background_texts") or soldier_data.get(
-            "background_texts", []
-        )
-        if not backgrounds:
-            raise PoolFormatError(
-                f"No background text is configured for {template_name!r}."
-            )
-        background_text = random.choice(backgrounds)
-        background_headers: list[str] = []
-        if template_name == "Soldier":
-            country_label = countries.get(selected_country, selected_country)
-            background_headers.append(f"Country of Origin: {country_label}")
-        birth_years = {
-            "Soldier": (1995, 2010),
-            "ReaperSoldier": (1990, 2005),
-            "SkirmisherSoldier": (2020, 2034),
-            "TemplarSoldier": (1995, 2010),
-        }.get(template_name)
-        if birth_years is not None:
-            birth_date = _random_date(*birth_years)
-            background_headers.append(
-                f"Date of Birth: {_MONTH_NAMES[birth_date.month - 1]} "
-                f"{birth_date.day}, {birth_date.year}"
-            )
-        if background_headers:
-            header_text = "\n".join(background_headers)
-            background_text = f"{header_text}\n\n{background_text}"
+        backgrounds = template_data.get("background_texts", [])
+        if not backgrounds and template_name == "Soldier":
+            backgrounds = soldier_data.get("background_texts", [])
+            if not backgrounds:
+                raise PoolFormatError(
+                    f"No background text is configured for {template_name!r}."
+                )
+        if backgrounds:
+            background_text = random.choice(backgrounds)
+            background_headers: list[str] = []
+            if template_name == "Soldier":
+                country_label = countries.get(selected_country, selected_country)
+                background_headers.append(f"Country of Origin: {country_label}")
+            birth_years = {
+                "Soldier": (1990, 2010),
+                "ReaperSoldier": (1985, 2005),
+                "SkirmisherSoldier": (2020, 2034),
+                "TemplarSoldier": (1990, 2010),
+            }.get(template_name)
+            if birth_years is not None:
+                birth_date = _random_date(*birth_years)
+                background_headers.append(
+                    f"Date of Birth: {_MONTH_NAMES[birth_date.month - 1]} "
+                    f"{birth_date.day}, {birth_date.year}"
+                )
+            if background_headers:
+                header_text = "\n".join(background_headers)
+                background_text = f"{header_text}\n\n{background_text}"
     background_text = background_text[: limits["BackgroundText"]]
     return Character(
         [
