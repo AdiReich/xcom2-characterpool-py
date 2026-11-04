@@ -478,7 +478,11 @@ class Pool:
 
 
 def _current_pool_timestamp() -> str:
-    return datetime.now().strftime("%Y%m%d_%H%M%S")
+    current = datetime.now()
+    return (
+        f"{_MONTH_NAMES[current.month - 1]} {current.day}, {current.year} - "
+        f"{current:%I:%M %p}"
+    )
 
 
 def _random_date(start_year: int, end_year: int) -> date:

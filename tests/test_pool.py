@@ -3,6 +3,7 @@ import struct
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from datetime import datetime
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
@@ -199,7 +200,7 @@ class PoolTests(unittest.TestCase):
                         Property(
                             "PoolTimestamp",
                             "StrProperty",
-                            "October 21, 2026 - 2:50 PM",
+                            "January 22, 2016 - 10:55 AM",
                         ),
                     ]
                 )
@@ -753,10 +754,14 @@ class PoolTests(unittest.TestCase):
     def test_generate_character_uses_extracted_country_and_background_data(
         self,
     ) -> None:
-        with patch(
-            "xcom2_characterpool_py.pool.random.choice",
-            side_effect=lambda items: items[0],
+        with (
+            patch(
+                "xcom2_characterpool_py.pool.random.choice",
+                side_effect=lambda items: items[0],
+            ),
+            patch("xcom2_characterpool_py.pool.datetime") as mocked_datetime,
         ):
+            mocked_datetime.now.return_value = datetime(2016, 1, 22, 10, 55)
             generated = generate_character("Alex", "Kim", "Viper")
 
         data_path = (
@@ -775,7 +780,8 @@ class PoolTests(unittest.TestCase):
         self.assertEqual(generated.get("strFirstName"), "Alex")
         self.assertEqual(generated.get("strLastName"), "Kim")
         self.assertEqual(generated.get("strNickName"), "'Viper'")
-        self.assertTrue(generated.get("PoolTimestamp"))
+        self.assertEqual(generated.get("PoolTimestamp"), "January 22, 2016 - 10:55 AM")
+        Pool([], [generated]).to_bytes()
         self.assertEqual(generated.get("CharacterTemplateName"), "Soldier")
         self.assertIn(
             generated.get("m_SoldierClassTemplateName"),
